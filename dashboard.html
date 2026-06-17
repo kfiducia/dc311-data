@@ -3,66 +3,344 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DC 311 - Submission Methods &amp; Rates</title>
+<title>DC 311 — Submission Methods & Rates</title>
+<meta name="description" content="DC 311 service request data — submission methods and volume over time">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&family=VT323&display=swap" rel="stylesheet">
 <script src="chart.umd.min.js"></script>
 <style>
-  :root { --bg:#0f1117; --card:#181b24; --ink:#e7e9ee; --mut:#9aa3b2; --line:#272b36; --accent:#4f9cf9; }
-  * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--ink);
-         font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
-  header { padding:28px 32px 8px; }
-  h1 { margin:0 0 4px; font-size:24px; }
-  .sub { color:var(--mut); font-size:13px; }
-  .kpis { display:flex; flex-wrap:wrap; gap:14px; padding:16px 32px; }
-  .kpi { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 18px; min-width:150px; }
-  .kpi .n { font-size:26px; font-weight:600; }
-  .kpi .l { color:var(--mut); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
-  .grid { display:grid; grid-template-columns:repeat(2,1fr); gap:18px; padding:8px 32px 48px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; min-height:340px; display:flex; flex-direction:column; }
-  .card.wide { grid-column:1 / -1; }
-  .card h2 { margin:0 0 2px; font-size:16px; }
-  .card p { margin:0 0 12px; color:var(--mut); font-size:12.5px; }
-  .wrap { position:relative; flex:1; min-height:260px; }
-  .note { padding:0 32px 40px; color:var(--mut); font-size:12.5px; max-width:900px; }
-  .yearbar { padding:6px 32px 2px; display:flex; align-items:center; gap:10px; font-size:13px; }
-  .yearbar .l { color:var(--mut); }
-  .yearbar .hint { color:var(--mut); font-size:12px; }
-  select { background:var(--card); color:var(--ink); border:1px solid var(--line);
-           border-radius:8px; padding:5px 10px; font-size:13px; }
-  a { color:var(--accent); }
-  @media (max-width:880px){ .grid{grid-template-columns:1fr;} }
+  :root {
+    --cream: #f3efe2;
+    --cream-2: #ecead9;
+    --ink: #1c1f24;
+    --ink-2: #4a4d52;
+    --muted: #8a8a85;
+    --line: #d8d4c5;
+    --accent: #d97e3f;
+    --crt: rgba(28, 31, 36, 0.04);
+    --nav-bg: rgba(244, 241, 232, 0.92);
+    --flag-bg: rgba(255, 255, 255, 0.4);
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --display: 'VT323', 'JetBrains Mono', monospace;
+    --ease: cubic-bezier(.2,.6,.2,1);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --cream: #15181d;
+      --cream-2: #1d2025;
+      --ink: #ece8d8;
+      --ink-2: #b5b1a4;
+      --muted: #6f6f68;
+      --line: #2c2f36;
+      --accent: #e88a48;
+      --crt: rgba(255, 255, 255, 0.025);
+      --nav-bg: rgba(21, 24, 29, 0.92);
+      --flag-bg: rgba(255, 255, 255, 0.04);
+      color-scheme: dark;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--cream);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    background-image: repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 2px,
+      var(--crt) 2px,
+      var(--crt) 3px
+    );
+  }
+  a { color: inherit; text-decoration: none; }
+  ::selection { background: var(--accent); color: var(--cream); }
+
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 0 clamp(1.25rem, 3vw, 2.5rem); }
+
+  /* ─── Nav ─── */
+  .nav {
+    position: sticky; top: 0; z-index: 50;
+    background: var(--nav-bg);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav-inner {
+    max-width: 1280px; margin: 0 auto;
+    padding: 0.9rem clamp(1.25rem, 3vw, 2.5rem);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .nav-back {
+    font-family: var(--mono);
+    font-weight: 700; font-size: .72rem; letter-spacing: .1em;
+    text-transform: lowercase; color: var(--ink-2);
+    transition: color .2s var(--ease);
+  }
+  .nav-back::before { content: "← "; color: var(--accent); }
+  .nav-back:hover { color: var(--accent); }
+  .nav-tag {
+    font-family: var(--mono);
+    font-size: .68rem; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .nav-tag::before { content: "// "; color: var(--accent); opacity: .8; }
+
+  /* ─── Header ─── */
+  header.page { padding: clamp(2.5rem, 5vw, 4rem) 0 1.5rem; }
+  .label-stack {
+    font-family: var(--display);
+    font-weight: 400;
+    line-height: .9;
+    color: var(--ink);
+    margin: 0;
+  }
+  .label-stack::before {
+    content: ">_";
+    display: block;
+    font-family: var(--mono);
+    font-size: .72rem; letter-spacing: .12em;
+    color: var(--accent); font-weight: 600;
+    margin-bottom: .65rem;
+  }
+  .label-stack .top { display: block; opacity: .55; font-size: clamp(2rem, 4vw, 3rem); }
+  .label-stack .bot { display: block; font-size: clamp(2.4rem, 5vw, 3.8rem); }
+
+  .sub {
+    margin-top: 1.1rem;
+    font-family: var(--mono);
+    font-size: .8rem;
+    color: var(--ink-2);
+    max-width: 80ch;
+    line-height: 1.65;
+  }
+  .sub::before { content: "// "; color: var(--accent); opacity: .8; }
+
+  .yearbar {
+    margin-top: 1.5rem;
+    padding: .85rem 1.1rem;
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    background: var(--flag-bg);
+    display: flex; align-items: center; gap: .85rem; flex-wrap: wrap;
+  }
+  .yearbar .l {
+    font-family: var(--mono);
+    font-weight: 600;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ink-2); font-size: .68rem;
+  }
+  .yearbar .l::before { content: ">"; color: var(--accent); margin-right: .4rem; }
+  .yearbar .hint {
+    color: var(--muted); font-family: var(--mono);
+    font-size: .7rem;
+  }
+  select {
+    background: var(--cream-2);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 0;
+    padding: .35rem .65rem;
+    font-family: var(--mono);
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .06em;
+    cursor: pointer;
+  }
+  select:focus { outline: 1.5px solid var(--accent); outline-offset: 1px; }
+
+  /* ─── KPIs ─── */
+  .kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0;
+    margin: 1.75rem 0 0;
+    border-top: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+  }
+  .kpi {
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    padding: 1.15rem 1.25rem;
+  }
+  .kpi .n {
+    font-family: var(--display);
+    font-size: 2.1rem;
+    line-height: 1;
+    color: var(--ink);
+  }
+  .kpi .l {
+    font-family: var(--mono);
+    font-size: .65rem;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    margin-top: .5rem;
+    font-weight: 500;
+  }
+  .kpi .l::before { content: ">"; color: var(--accent); margin-right: .35rem; opacity: .7; }
+
+  /* ─── Grid / Cards ─── */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0;
+    margin: 1.5rem 0 3rem;
+    border-top: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+  }
+  .card {
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    padding: 1.25rem 1.35rem 1.5rem;
+    min-height: 360px;
+    display: flex; flex-direction: column;
+  }
+  .card.wide { grid-column: 1 / -1; }
+  .card h2 {
+    margin: 0 0 .35rem;
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: 1.5rem;
+    color: var(--ink);
+    line-height: 1.05;
+  }
+  .card h2::before {
+    content: "// ";
+    color: var(--accent);
+    opacity: .8;
+    font-family: var(--mono);
+    font-size: .68rem;
+    letter-spacing: .12em;
+    vertical-align: middle;
+    margin-right: .25rem;
+  }
+  .card p {
+    margin: 0 0 .9rem;
+    font-family: var(--mono);
+    font-size: .72rem;
+    letter-spacing: .02em;
+    color: var(--ink-2);
+    line-height: 1.5;
+  }
+  .card p code, .note code {
+    font-family: var(--mono);
+    background: var(--cream-2);
+    padding: 1px 5px;
+    border: 1px solid var(--line);
+    font-size: .72rem;
+  }
+  .wrap-canvas { position: relative; flex: 1; min-height: 260px; }
+
+  /* ─── Note ─── */
+  .note {
+    margin: 2rem 0 4rem;
+    padding: 1.15rem 1.3rem;
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    background: var(--flag-bg);
+    font-family: var(--mono);
+    font-size: .78rem; line-height: 1.65;
+    color: var(--ink-2);
+    max-width: 92ch;
+  }
+  .note b { color: var(--ink); font-weight: 700; }
+  .note::before {
+    content: "//";
+    color: var(--accent);
+    font-weight: 700;
+    margin-right: .55rem;
+  }
+
+  /* ─── Footer ─── */
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 2rem 0 2.5rem;
+  }
+  .foot-inner {
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: var(--mono);
+    font-size: .68rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .foot-inner a { transition: color .2s var(--ease); }
+  .foot-inner a:hover { color: var(--accent); }
+  .foot-inner .ast { color: var(--accent); }
+
+  @media (max-width: 880px) {
+    .grid { grid-template-columns: 1fr; }
+    .foot-inner { flex-direction: column; gap: .85rem; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>DC 311 &mdash; Submission Methods &amp; Rates</h1>
-  <div class="sub" id="sub"></div>
-  <div class="yearbar">
-    <span class="l">Method data &mdash; year:</span>
-    <select id="yearsel"></select>
-    <span class="hint" id="yearhint"></span>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="https://kfiducia.com/" class="nav-back">kfiducia.com</a>
+    <span class="nav-tag">DC 311 / Data</span>
   </div>
-</header>
-<div class="kpis" id="kpis"></div>
-<div class="grid">
-  <div class="card"><h2>How requests are submitted</h2><p>Channel families &mdash; enriched 2026 sample</p><div class="wrap"><canvas id="channel"></canvas></div></div>
-  <div class="card"><h2>Raw source values</h2><p>Exact <code>source</code> field, enriched 2026 sample</p><div class="wrap"><canvas id="source"></canvas></div></div>
-  <div class="card"><h2>Origin (system of record)</h2><p><code>origin</code> field</p><div class="wrap"><canvas id="origin"></canvas></div></div>
-  <div class="card"><h2>Channel mix over time (2026)</h2><p>Weekly share by channel. <b>Hatched bars = weeks with insufficient samples (n&lt;120)</b></p><div class="wrap"><canvas id="mixweek"></canvas></div></div>
-  <div class="card wide"><h2>Submission rate &mdash; volume by year</h2><p>All requests, full bulk dataset 2009&ndash;2026 (2026 partial &mdash; through mid-June)</p><div class="wrap"><canvas id="byyear"></canvas></div></div>
-  <div class="card wide"><h2>Submission rate &mdash; monthly volume (2026)</h2><p>Requests created per month this year</p><div class="wrap"><canvas id="month2026"></canvas></div></div>
-  <div class="card"><h2>Method by service type</h2><p>Source mix for the top service categories</p><div class="wrap"><canvas id="bysvc"></canvas></div></div>
-  <div class="card"><h2>Time of day by channel</h2><p>Share of each channel's requests by hour (UTC)</p><div class="wrap"><canvas id="byhour"></canvas></div></div>
-</div>
-<div class="note" id="note"></div>
+</nav>
+
+<main class="wrap">
+
+  <header class="page">
+    <h1 class="label-stack">
+      <span class="top">DC 311</span>
+      <span class="bot">Methods &amp; Rates.</span>
+    </h1>
+    <div class="sub" id="sub"></div>
+    <div class="yearbar">
+      <span class="l">Method data — year</span>
+      <select id="yearsel"></select>
+      <span class="hint" id="yearhint"></span>
+    </div>
+  </header>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid">
+    <div class="card"><h2>How requests are submitted</h2><p>Channel families — enriched 2026 sample</p><div class="wrap-canvas"><canvas id="channel"></canvas></div></div>
+    <div class="card"><h2>Raw source values</h2><p>Exact <code>source</code> field, enriched 2026 sample</p><div class="wrap-canvas"><canvas id="source"></canvas></div></div>
+    <div class="card"><h2>Origin (system of record)</h2><p><code>origin</code> field</p><div class="wrap-canvas"><canvas id="origin"></canvas></div></div>
+    <div class="card"><h2>Channel mix over time (2026)</h2><p>Weekly share by channel. <b>Hatched bars = weeks with insufficient samples (n&lt;120)</b></p><div class="wrap-canvas"><canvas id="mixweek"></canvas></div></div>
+    <div class="card wide"><h2>Submission rate — volume by year</h2><p>All requests, full bulk dataset 2009–2026 (2026 partial — through mid-June)</p><div class="wrap-canvas"><canvas id="byyear"></canvas></div></div>
+    <div class="card wide"><h2>Submission rate — monthly volume (2026)</h2><p>Requests created per month this year</p><div class="wrap-canvas"><canvas id="month2026"></canvas></div></div>
+    <div class="card"><h2>Method by service type</h2><p>Source mix for the top service categories</p><div class="wrap-canvas"><canvas id="bysvc"></canvas></div></div>
+    <div class="card"><h2>Time of day by channel</h2><p>Share of each channel's requests by hour (UTC)</p><div class="wrap-canvas"><canvas id="byhour"></canvas></div></div>
+  </div>
+
+  <div class="note" id="note"></div>
+
+</main>
+
+<footer>
+  <div class="wrap foot-inner">
+    <span><span class="ast">✱</span> Kyle Fiducia · DC 311 Data · 2026</span>
+    <a href="https://github.com/kfiducia/dc311-data">github.com/kfiducia/dc311-data →</a>
+  </div>
+</footer>
 
 <script>
 const DATA = {"generated":"2026-06-17T02:41:30.723519+00:00","bulk_total":4966653,"by_year":[[2009,21617],[2010,30199],[2011,10550],[2012,260608],[2013,235024],[2014,325538],[2015,298413],[2016,304475],[2017,311437],[2018,338903],[2019,367055],[2020,305612],[2021,360842],[2022,386708],[2023,425262],[2024,398030],[2025,356000],[2026,230380]],"by_month":[["2009-01",327],["2009-02",303],["2009-03",466],["2009-04",518],["2009-05",1060],["2009-06",1436],["2009-07",1413],["2009-08",1056],["2009-09",476],["2009-10",2735],["2009-11",8386],["2009-12",3441],["2010-01",2532],["2010-02",4519],["2010-03",5273],["2010-04",2513],["2010-05",988],["2010-06",4037],["2010-07",1144],["2010-08",5849],["2010-09",1354],["2010-10",697],["2010-11",564],["2010-12",729],["2011-01",1109],["2011-02",695],["2011-03",798],["2011-04",958],["2011-05",1219],["2011-06",866],["2011-07",809],["2011-08",1081],["2011-09",934],["2011-10",738],["2011-11",454],["2011-12",889],["2012-01",574],["2012-02",493],["2012-03",20207],["2012-04",27833],["2012-05",30631],["2012-06",32751],["2012-07",33302],["2012-08",31769],["2012-09",29419],["2012-10",23907],["2012-11",24332],["2012-12",5390],["2013-01",648],["2013-02",730],["2013-03",16559],["2013-04",26143],["2013-05",26269],["2013-06",27144],["2013-07",28835],["2013-08",25871],["2013-09",23238],["2013-10",22738],["2013-11",18112],["2013-12",18737],["2014-01",22181],["2014-02",22851],["2014-03",32591],["2014-04",38736],["2014-05",32858],["2014-06",30466],["2014-07",30925],["2014-08",28813],["2014-09",27231],["2014-10",22042],["2014-11",17522],["2014-12",19322],["2015-01",22965],["2015-02",20041],["2015-03",31026],["2015-04",28769],["2015-05",26463],["2015-06",28886],["2015-07",30253],["2015-08",26002],["2015-09",22846],["2015-10",21251],["2015-11",18625],["2015-12",21286],["2016-01",34709],["2016-02",21591],["2016-03",24078],["2016-04",24003],["2016-05",24382],["2016-06",26421],["2016-07",26034],["2016-08",29980],["2016-09",27042],["2016-10",24324],["2016-11",20984],["2016-12",20927],["2017-01",22753],["2017-02",21028],["2017-03",24336],["2017-04",24886],["2017-05",27120],["2017-06",29152],["2017-07",29367],["2017-08",30732],["2017-09",27720],["2017-10",26981],["2017-11",23941],["2017-12",23421],["2018-01",24960],["2018-02",23594],["2018-03",28760],["2018-04",27143],["2018-05",31199],["2018-06",32194],["2018-07",31413],["2018-08",33250],["2018-09",28866],["2018-10",30849],["2018-11",23735],["2018-12",22940],["2019-01",28914],["2019-02",25790],["2019-03",30702],["2019-04",31633],["2019-05",34934],["2019-06",33711],["2019-07",36285],["2019-08",35480],["2019-09",30372],["2019-10",29940],["2019-11",23154],["2019-12",26140],["2020-01",33959],["2020-02",24834],["2020-03",24321],["2020-04",22330],["2020-05",24529],["2020-06",26317],["2020-07",28917],["2020-08",27543],["2020-09",27129],["2020-10",24111],["2020-11",20420],["2020-12",21202],["2021-01",20705],["2021-02",21933],["2021-03",26702],["2021-04",26682],["2021-05",27121],["2021-06",34495],["2021-07",36673],["2021-08",37131],["2021-09",34647],["2021-10",39462],["2021-11",28130],["2021-12",27161],["2022-01",32026],["2022-02",24499],["2022-03",31536],["2022-04",31325],["2022-05",34329],["2022-06",36397],["2022-07",35689],["2022-08",38496],["2022-09",35534],["2022-10",31566],["2022-11",27303],["2022-12",28008],["2023-01",31111],["2023-02",26772],["2023-03",33318],["2023-04",35677],["2023-05",42053],["2023-06",39676],["2023-07",41981],["2023-08",44044],["2023-09",34931],["2023-10",37338],["2023-11",30026],["2023-12",28335],["2024-01",35233],["2024-02",29599],["2024-03",33984],["2024-04",37281],["2024-05",40847],["2024-06",38580],["2024-07",37993],["2024-08",38521],["2024-09",36778],["2024-10",37186],["2024-11",28592],["2024-12",3436],["2025-01",36956],["2025-02",29865],["2025-03",36707],["2025-04",37681],["2025-05",42122],["2025-06",41746],["2025-07",45137],["2025-08",41344],["2025-09",37943],["2025-10",6499],["2026-01",38050],["2026-02",44813],["2026-03",40113],["2026-04",40967],["2026-05",42221],["2026-06",24216]],"month_2026":[["2026-01",38050],["2026-02",44813],["2026-03",40113],["2026-04",40967],["2026-05",42221],["2026-06",24216]],"week_2026":[["2026-W01",2585],["2026-W02",8825],["2026-W03",7362],["2026-W04",6864],["2026-W05",13025],["2026-W06",13575],["2026-W07",14258],["2026-W08",8489],["2026-W09",8583],["2026-W10",8581],["2026-W11",9362],["2026-W12",8993],["2026-W13",9337],["2026-W14",8873],["2026-W15",9412],["2026-W16",9763],["2026-W17",9747],["2026-W18",9457],["2026-W19",9812],["2026-W20",9956],["2026-W21",9367],["2026-W22",9938],["2026-W23",10794],["2026-W24",10202],["2026-W25",3220]],"by_year_ward":{"2009":[["Ward 2",6606],["Ward 6",6386],["Ward 5",1802],["Ward 3",1617],["Ward 4",1567],["Ward 7",1487],["Ward 1",1362],["Ward 8",780],["Unknown",10]],"2010":[["Ward 2",12137],["Ward 6",6788],["Ward 1",2270],["Ward 5",2122],["Ward 7",1898],["Ward 4",1868],["Ward 3",1843],["Ward 8",1271],["Unknown",2]],"2011":[["Ward 2",2208],["Ward 6",1625],["Ward 5",1416],["Ward 7",1329],["Ward 4",1146],["Ward 1",1088],["Ward 8",893],["Ward 3",845]],"2012":[["Ward 2",74490],["Ward 6",44076],["Ward 4",23558],["Ward 5",22964],["Unknown",21862],["Ward 3",20863],["Ward 1",20782],["Ward 7",19946],["Ward 8",12067]],"2013":[["Ward 2",64151],["Ward 6",42562],["Ward 4",26363],["Ward 5",24588],["Ward 7",22068],["Ward 1",21723],["Ward 3",19699],["Ward 8",13865],["Unknown",5]],"2014":[["Ward 2",81603],["Ward 6",55447],["Ward 4",39960],["Ward 5",36980],["Ward 7",31627],["Ward 3",31312],["Ward 1",29685],["Ward 8",18920],["Unknown",4]],"2015":[["Ward 2",71631],["Ward 6",45998],["Ward 4",35931],["Ward 5",35781],["Ward 7",31971],["Ward 1",30480],["Ward 3",26775],["Ward 8",19818],["Null",17],["Unknown",11]],"2016":[["Ward 2",52434],["Ward 6",52294],["Ward 4",41966],["Ward 5",39798],["Ward 7",32580],["Ward 1",32575],["Ward 3",28003],["Ward 8",22455],["Null",2369],["null",1]],"2017":[["Ward 2",51084],["Ward 6",49923],["Ward 5",42371],["Ward 4",42084],["Ward 1",36013],["Ward 7",33885],["Ward 3",29645],["Ward 8",23494],["Null",2938]],"2018":[["Ward 2",61015],["Ward 6",55005],["Ward 5",44235],["Ward 4",43374],["Ward 1",37281],["Ward 7",37196],["Ward 3",32342],["Ward 8",25426],["Null",3029]],"2019":[["Ward 6",62293],["Ward 2",57771],["Ward 5",49384],["Ward 4",45106],["Ward 7",42319],["Ward 1",39590],["Ward 8",35028],["Ward 3",32837],["Null",2725],["Unknown",2]],"2020":[["Ward 6",48474],["Ward 4",45809],["Ward 5",45584],["Ward 8",37138],["Ward 7",36115],["Ward 1",31659],["Ward 2",30402],["Ward 3",28826],["Null",1601],["Unknown",4]],"2021":[["Ward 6",59682],["Ward 5",53525],["Ward 4",50191],["Ward 1",44587],["Ward 7",43337],["Ward 8",41328],["Ward 2",36492],["Ward 3",29891],["Null",1809]],"2022":[["Ward 6",67466],["Ward 5",58498],["Ward 4",53638],["Ward 1",47647],["Ward 7",46142],["Ward 2",42978],["Ward 8",35767],["Ward 3",32279],["Null",2292],["Unknown",1]],"2023":[["Ward 6",76008],["Ward 5",63462],["Ward 4",59815],["Ward 1",51209],["Ward 7",46893],["Ward 2",45342],["Ward 8",42888],["Ward 3",37288],["Null",2357]],"2024":[["Ward 6",66825],["Ward 5",59488],["Ward 4",58077],["Ward 1",49087],["Ward 7",46485],["Ward 2",41158],["Ward 8",40368],["Ward 3",34797],["Null",1683],["Unknown",62]],"2025":[["Ward 5",54355],["Ward 4",52623],["Ward 6",51629],["Ward 7",46167],["Ward 1",41087],["Ward 2",39923],["Ward 8",36019],["Ward 3",34191],["Unknown",6]],"2026":[["Ward 4",35628],["Ward 5",34007],["Ward 7",31817],["Ward 6",30527],["Ward 1",26817],["Ward 8",25836],["Ward 2",22944],["Ward 3",22802],["Unknown",2]]},"method_years":["2024","2026"],"methods":{"2024":{"enriched_n":1471,"source_counts":[["Agent",617],["Mobile",382],["Web",313],["iOS",108],["Android",24],["IVR",17],["Text-To-311",9],["DowntownBid",1]],"origin_counts":[["API",853],["Phone",540],["Email",68],["Twitter",9],["Live Agent",1]],"channel_counts":[["Phone / Call center",617],["Mobile web",382],["Desktop web",313],["Native mobile app",132],["Other",27]],"source_by_week":{"2024-W01":{"Web":45,"Agent":67,"Mobile":51,"iOS":13,"Android":2,"IVR":2},"2024-W02":{"Agent":97,"Mobile":45,"Web":35,"iOS":14,"Android":2,"IVR":1},"2024-W03":{"Web":42,"iOS":12,"Agent":58,"Mobile":57,"DowntownBid":1,"Text-To-311":3,"Android":5},"2024-W04":{"Mobile":57,"Agent":89,"iOS":11,"Web":33,"IVR":6,"Android":2},"2024-W05":{"Agent":77,"Mobile":38,"iOS":16,"Web":38,"Android":4,"Text-To-311":1,"IVR":2},"2024-W06":{"Agent":79,"Mobile":38,"iOS":9,"Web":39,"Android":2,"IVR":1},"2024-W07":{"Agent":53,"Mobile":51,"Android":3,"Web":38,"iOS":12,"IVR":2,"Text-To-311":3},"2024-W08":{"Web":29,"Agent":68,"Mobile":38,"iOS":15,"Android":3,"IVR":2},"2024-W09":{"Agent":28,"Web":14,"iOS":6,"Mobile":7,"Text-To-311":2,"IVR":1,"Android":1},"2024-W19":{"Agent":1}},"source_by_service":{"Residential Bulk Collection":{"Web":119,"Agent":140,"Mobile":177,"Android":3,"iOS":5,"Text-To-311":3},"Tree Pruning":{"iOS":3,"Agent":13,"Web":2,"Mobile":2},"Trash Collection - Missed":{"Agent":98,"Mobile":91,"Web":35,"iOS":3,"Android":1,"Text-To-311":1},"Roadway Signs":{"Web":14,"Android":1,"Agent":42,"iOS":5,"Mobile":4},"Pothole":{"Mobile":11,"Agent":13,"iOS":3,"Web":9},"Container Removal":{"Web":8,"Agent":11,"iOS":1,"Android":1,"Mobile":2},"Graffiti Removal":{"iOS":6,"Web":3,"Agent":24,"Mobile":1},"Streetlight Repair Investigation":{"Web":29,"Agent":24,"iOS":13,"Mobile":18,"Text-To-311":1,"Android":2},"Leaf Collection Missed":{"iOS":8,"Web":7,"Agent":14,"Mobile":4,"Android":1},"Traffic Lights and Pedestrian Walk Signals":{"Agent":28,"Web":5,"Mobile":10,"iOS":1,"Android":1},"Recycling Collection - Missed":{"iOS":18,"Agent":55,"Android":6,"Web":13,"Mobile":16,"Text-To-311":2},"Tree Planting":{"Agent":5,"Mobile":1,"iOS":2},"Illegal Poster":{"Mobile":5,"Agent":3,"Web":9,"Android":1},"Recycling Cart Repair":{"Agent":3,"Mobile":3,"iOS":3,"Web":1},"Supercan - Delivery":{"Agent":16,"Web":7,"Mobile":1,"iOS":1},"Public Space Litter Can Installation":{"Web":2,"Agent":2,"Mobile":1},"Recycling Cart Delivery":{"Agent":15,"Web":5,"Mobile":1,"iOS":1},"Trash Cart - Delivery":{"Agent":11,"iOS":1,"Web":2},"Tree Inspection":{"Agent":21,"iOS":1,"Mobile":1,"Web":1},"Sidewalk Repair":{"Mobile":4,"Agent":14,"Web":7,"Android":2,"iOS":5},"Public Space Litter Can Repair":{"iOS":2,"Mobile":1},"Parking Meter Repair":{"iOS":2,"IVR":17,"Web":2,"Agent":14,"Mobile":2},"Alley Repair Investigation":{"Agent":2,"iOS":2,"Web":4},"Abandoned Bicycle":{"Agent":2},"Dead Animal Collection":{"Mobile":3,"Agent":9,"iOS":7,"Android":2,"Web":3},"Utility Repair Issue":{"Agent":3,"Mobile":2},"Roadway Repair":{"Agent":3,"Web":3,"DowntownBid":1,"iOS":2,"Mobile":1},"Tree Removal":{"Agent":2,"Mobile":5,"Text-To-311":2,"Web":2},"Supercan - Repair":{"Web":5,"Agent":4,"Mobile":1},"Bee Treatment and Inspection (DOH)":{"Agent":1},"Bicycle Services":{"Mobile":1},"Pet Waste Complaint":{"Agent":4,"Web":2,"iOS":1},"DGS - Playground Repair":{"Web":3,"Android":1,"Agent":1,"Mobile":1},"Roadway Markings / Pylons":{"Mobile":2,"iOS":1,"Android":1,"Agent":1},"Litter can - Collection":{"iOS":8,"Agent":8,"Web":6,"Mobile":4,"Android":1},"Trash Cart Repair":{"Web":4,"iOS":1,"Agent":3,"Mobile":3},"DC Dog Park Maintenance (DGS)":{"Agent":2},"Vacant Lot - Public Property Only":{"Mobile":1,"Agent":2,"iOS":2},"DC Facilities Landscaping and Grounds Maintenance (DGS)":{"Mobile":1,"Agent":1,"Web":1},"Public Space Inspection":{"Agent":3,"Mobile":1}},"source_by_hour":{"Web":{"14":28,"17":26,"22":22,"18":25,"20":26,"19":25,"16":28,"13":19,"21":25,"4":3,"12":10,"1":9,"0":12,"2":4,"23":16,"15":20,"5":3,"3":6,"11":2,"6":1,"10":1,"7":1,"9":1},"Agent":{"13":53,"18":45,"22":34,"19":63,"21":54,"4":3,"15":48,"16":48,"20":66,"14":72,"17":48,"0":15,"1":6,"23":21,"3":4,"9":5,"12":13,"7":1,"10":2,"11":3,"6":3,"5":2,"8":2,"2":6},"Mobile":{"11":9,"13":25,"17":24,"19":27,"22":26,"16":31,"0":17,"3":16,"23":20,"18":21,"14":28,"15":18,"1":21,"2":20,"20":25,"21":26,"12":12,"8":1,"4":8,"6":1,"5":3,"9":2,"10":1},"iOS":{"23":6,"18":6,"17":11,"20":8,"13":8,"1":6,"16":10,"19":5,"0":7,"14":6,"3":4,"22":7,"21":10,"4":2,"15":5,"2":3,"12":4},"Android":{"19":5,"12":1,"22":4,"2":1,"21":1,"1":1,"16":1,"23":1,"13":1,"14":1,"10":1,"15":1,"6":1,"3":1,"18":2,"5":1},"IVR":{"0":1,"14":3,"17":3,"15":5,"16":2,"18":1,"19":1,"20":1},"DowntownBid":{"17":1},"Text-To-311":{"6":1,"3":1,"1":1,"15":2,"21":2,"19":1,"20":1}},"source_by_dow":{"Web":{"0":56,"1":51,"2":40,"3":35,"4":37,"5":35,"6":59},"Agent":{"0":100,"1":109,"2":111,"3":100,"4":90,"5":56,"6":51},"Mobile":{"0":50,"1":42,"2":30,"3":50,"4":45,"5":63,"6":102},"iOS":{"0":18,"1":15,"2":14,"3":16,"4":13,"5":17,"6":15},"Android":{"0":3,"3":3,"4":7,"1":5,"5":2,"2":4},"IVR":{"5":6,"1":2,"3":4,"4":2,"2":2,"6":1},"DowntownBid":{"0":1},"Text-To-311":{"0":3,"3":1,"4":1,"2":1,"5":3}}},"2026":{"enriched_n":5862,"source_counts":[["Agent",2251],["Web",1478],["iOS Browser",1363],["iOS",351],["Android Browser",251],["Android",91],["AWS Connect - Production",75],["DPW-Trakster Key",2]],"origin_counts":[["API",3611],["Phone",2065],["Email",121],["Live Agent",37],["Twitter",28]],"channel_counts":[["Phone / Call center",2326],["Mobile web",1614],["Desktop web",1478],["Native mobile app",442],["Other",2]],"source_by_week":{"2026-W01":{"Web":29,"Android":2,"Android Browser":8,"Agent":49,"iOS Browser":45,"iOS":9},"2026-W02":{"Web":64,"Agent":107,"iOS Browser":56,"Android Browser":15,"Android":6,"iOS":14},"2026-W03":{"Agent":99,"iOS Browser":43,"Web":60,"iOS":16,"Android Browser":4,"Android":2},"2026-W04":{"iOS Browser":38,"Web":52,"Agent":82,"iOS":7,"Android Browser":7,"Android":3,"DPW-Trakster Key":1},"2026-W05":{"iOS Browser":14,"Web":28,"Agent":18,"Android Browser":2},"2026-W06":{"iOS Browser":78,"Web":57,"Agent":112,"Android Browser":11,"iOS":16,"Android":2},"2026-W07":{"iOS Browser":86,"Web":79,"Agent":151,"iOS":12,"Android Browser":10},"2026-W08":{"Web":77,"iOS Browser":75,"Agent":108,"iOS":16,"Android":7,"Android Browser":8},"2026-W09":{"Agent":94,"iOS Browser":42,"Web":77,"Android Browser":12,"Android":8,"iOS":15},"2026-W10":{"iOS Browser":50,"Agent":75,"Web":56,"Android":4,"Android Browser":14,"iOS":12,"AWS Connect - Production":3,"DPW-Trakster Key":1},"2026-W11":{"Android Browser":10,"iOS":14,"Web":59,"Agent":87,"iOS Browser":56,"AWS Connect - Production":3,"Android":4},"2026-W12":{"Android":3,"Agent":82,"Web":52,"iOS Browser":58,"iOS":25,"AWS Connect - Production":7,"Android Browser":8},"2026-W13":{"iOS Browser":47,"iOS":27,"Web":65,"Agent":76,"Android Browser":7,"Android":4,"AWS Connect - Production":1},"2026-W14":{"iOS":16,"Web":62,"Agent":86,"iOS Browser":60,"Android":1,"AWS Connect - Production":2,"Android Browser":8},"2026-W15":{"Web":51,"iOS Browser":47,"Agent":89,"AWS Connect - Production":3,"Android":4,"Android Browser":10,"iOS":11},"2026-W16":{"Web":58,"iOS Browser":62,"Agent":109,"iOS":12,"AWS Connect - Production":4,"Android":4,"Android Browser":6},"2026-W17":{"iOS":14,"Web":54,"Agent":78,"Android Browser":11,"iOS Browser":59,"Android":5,"AWS Connect - Production":6},"2026-W18":{"Web":55,"iOS":16,"Agent":100,"AWS Connect - Production":4,"iOS Browser":44,"Android Browser":9,"Android":3},"2026-W19":{"iOS":18,"Agent":107,"iOS Browser":65,"Web":55,"AWS Connect - Production":3,"Android Browser":23,"Android":3},"2026-W20":{"Web":63,"iOS Browser":68,"Agent":101,"Android":5,"Android Browser":13,"iOS":11,"AWS Connect - Production":4},"2026-W21":{"iOS Browser":61,"Agent":100,"AWS Connect - Production":5,"Web":80,"Android Browser":12,"iOS":15,"Android":4},"2026-W22":{"Agent":92,"Android":7,"iOS Browser":71,"Web":76,"iOS":13,"AWS Connect - Production":16,"Android Browser":12},"2026-W23":{"AWS Connect - Production":3,"Android Browser":13,"Agent":111,"Web":67,"iOS Browser":64,"iOS":19,"Android":3},"2026-W24":{"Agent":105,"iOS Browser":62,"Web":78,"iOS":19,"AWS Connect - Production":9,"Android Browser":15,"Android":5},"2026-W25":{"Agent":33,"iOS Browser":12,"Web":24,"iOS":4,"AWS Connect - Production":2,"Android Browser":3,"Android":2}},"source_by_service":{"Trash Collection - Missed":{"Web":167,"Android":17,"Agent":403,"iOS Browser":220,"iOS":44,"Android Browser":36,"AWS Connect - Production":53},"Supercan - Delivery":{"Android Browser":5,"Web":28,"Agent":71,"iOS Browser":12,"Android":1,"iOS":1},"Container Removal":{"iOS Browser":11,"Agent":49,"Web":20,"Android Browser":4,"Android":3,"iOS":3},"Residential Bulk Collection":{"iOS Browser":554,"Agent":501,"Android Browser":92,"Web":426,"iOS":125,"Android":25},"Recycling Collection - Missed":{"Agent":174,"iOS Browser":91,"Web":109,"Android Browser":22,"Android":8,"iOS":29},"Streetlight Repair Investigation":{"Agent":37,"Web":30,"iOS Browser":18,"AWS Connect - Production":4,"iOS":3,"Android Browser":1,"Android":2},"Pothole":{"Agent":86,"iOS Browser":51,"Web":58,"Android":5,"Android Browser":13,"iOS":6},"Parking Meter Repair":{"Agent":27,"Android Browser":1,"iOS Browser":1,"Web":1},"Sidewalk Repair":{"Web":36,"Agent":26,"iOS Browser":23,"iOS":28,"Android Browser":4,"Android":1},"Dead Animal Collection":{"Agent":69,"iOS Browser":25,"iOS":8,"Android Browser":3,"Web":18,"DPW-Trakster Key":1,"Android":3},"Leaf Collection Missed":{"Web":8,"Agent":26,"iOS":1,"iOS Browser":5,"Android Browser":2},"Graffiti Removal":{"Agent":39,"iOS":9,"iOS Browser":10,"Web":11,"Android Browser":7},"Roadway Signs":{"Agent":79,"Web":62,"Android Browser":6,"iOS Browser":24,"iOS":9,"Android":3,"AWS Connect - Production":3},"Tree Planting":{"Agent":59,"iOS Browser":5,"Web":8,"Android Browser":3,"iOS":6},"Public Space Litter Can Repair":{"Agent":5,"Web":4,"iOS":1,"Android Browser":1,"iOS Browser":1},"Litter can - Collection":{"Web":7,"iOS":11,"Agent":31,"iOS Browser":21,"Android Browser":4,"Android":3},"Recycling Cart Repair":{"Web":15,"iOS Browser":12,"Android Browser":4,"iOS":2,"Agent":6},"Trash Cart - Delivery":{"Web":25,"iOS Browser":19,"Agent":34,"iOS":1,"Android":2},"Trash Cart Repair":{"Web":14,"Agent":9,"iOS Browser":12,"iOS":2,"Android Browser":1},"Roadway Repair":{"Web":18,"iOS Browser":8,"iOS":2,"Agent":7},"Christmas Tree Removal-Missed":{"Agent":29,"iOS Browser":16,"Web":16,"DPW-Trakster Key":1,"Android Browser":2,"iOS":1},"Traffic Lights and Pedestrian Walk Signals":{"Web":111,"Agent":68,"iOS Browser":25,"iOS":3,"Android":2,"Android Browser":4},"Illegal Poster":{"Web":15,"iOS":2,"iOS Browser":3},"Roadway Markings / Pylons":{"Agent":9,"Web":12,"iOS Browser":5,"iOS":3},"Tree Pruning":{"Agent":32,"Web":32,"iOS Browser":14,"Android Browser":3,"Android":1,"iOS":4},"Public Space Inspection":{"iOS Browser":9,"Web":15,"Agent":41,"Android":1,"Android Browser":1,"iOS":2},"DC Indoor and Outdoor Pool Maintenance  (DGS)":{"iOS Browser":1},"Tree Removal":{"Web":16,"Agent":13,"iOS Browser":8,"iOS":3,"Android Browser":3,"Android":1},"Recycling Cart Delivery":{"Web":38,"Agent":40,"iOS Browser":18,"Android Browser":3},"Supercan - Repair":{"iOS Browser":4,"Web":7,"iOS":1,"Agent":10,"Android Browser":1},"Tree Inspection":{"Web":25,"Agent":71,"iOS Browser":14,"iOS":2,"Android":1},"Pet Waste Complaint":{"iOS Browser":9,"Agent":7,"Android Browser":2,"iOS":1,"Android":1,"Web":1},"Alley Repair Investigation":{"iOS Browser":2,"Web":7,"Agent":2,"iOS":1},"OCTFME - Down Cable Wires":{"Agent":28,"iOS Browser":7,"iOS":3,"Web":5,"Android Browser":1},"Traffic Safety Input":{"Web":23,"Agent":17,"iOS Browser":5,"iOS":3,"Android Browser":1},"DC Facilities Landscaping and Grounds Maintenance (DGS)":{"Agent":3,"iOS Browser":4,"Android Browser":1},"DGS - Playground Repair":{"iOS Browser":8,"iOS":2,"Agent":4,"Web":2,"Android Browser":1},"Public Space Litter Can Installation":{"Agent":4,"Web":2,"iOS":1},"Signed Street Sweeping Missed":{"Agent":7,"iOS":2},"Bicycle Services":{"iOS Browser":7,"Web":4,"Agent":2,"iOS":1,"Android Browser":2},"Abandoned Bicycle":{"Agent":6,"Web":1},"Public Space Litter Can Removal":{"Agent":1},"Grass and Weeds Mowing (DPW)":{"Web":1,"Agent":12,"iOS Browser":5,"iOS":1,"Android":1},"DC Dog Park Maintenance (DGS)":{"iOS Browser":1,"iOS":1},"Vacant Lot - Public Property Only":{"iOS Browser":1,"Agent":8,"Android":1},"Alley Cleaning":{"iOS":9,"Web":9,"iOS Browser":9,"Agent":19,"Android":1,"Android Browser":2},"Illegal Dumping":{"iOS Browser":36,"Web":27,"Agent":23,"Android Browser":2,"Android":7,"AWS Connect - Production":5,"iOS":5},"DC Health Rodent & Vector Control":{"Agent":55,"iOS Browser":28,"AWS Connect - Production":10,"Android Browser":13,"Web":42,"iOS":9},"DGS Overflowing Recycling Can":{"iOS Browser":1,"Web":1},"DC Spray Parks (DGS)":{"Android":1},"Grass Mowing Services Missed (DGS)":{"Agent":1,"Web":1},"Bee Treatment and Inspection (DOH)":{"Agent":1}},"source_by_hour":{"Web":{"12":56,"13":88,"18":142,"14":123,"22":77,"15":133,"21":108,"20":101,"17":113,"19":110,"2":25,"0":53,"16":130,"1":48,"3":20,"23":70,"5":5,"11":33,"10":12,"9":12,"7":9,"6":2,"8":6,"4":2},"Android":{"12":4,"23":6,"20":7,"16":3,"11":5,"1":3,"21":9,"0":5,"14":5,"15":6,"22":5,"17":6,"13":10,"18":5,"4":1,"7":1,"2":5,"19":2,"3":2,"10":1},"Android Browser":{"13":16,"19":14,"22":24,"15":19,"20":17,"8":2,"2":6,"5":4,"12":6,"21":22,"0":12,"11":9,"18":15,"3":2,"6":2,"17":18,"10":6,"14":20,"1":5,"16":18,"23":11,"7":2,"4":1},"Agent":{"17":187,"20":183,"19":196,"12":130,"14":223,"15":192,"23":67,"18":210,"13":212,"16":177,"21":137,"2":27,"1":30,"6":5,"22":99,"0":64,"8":2,"4":6,"5":3,"3":22,"10":14,"11":60,"9":5},"iOS Browser":{"16":89,"8":3,"21":78,"19":87,"11":43,"18":89,"22":99,"15":90,"23":86,"17":93,"7":2,"13":78,"20":102,"3":24,"1":68,"14":93,"0":64,"6":3,"2":42,"12":82,"4":19,"9":7,"10":17,"5":5},"iOS":{"18":22,"23":18,"14":32,"20":24,"21":23,"19":28,"22":28,"2":10,"13":20,"17":22,"12":28,"3":4,"7":1,"15":20,"0":16,"16":29,"9":3,"10":5,"1":9,"11":5,"4":3,"5":1},"AWS Connect - Production":{"20":14,"19":15,"21":8,"22":6,"18":10,"16":3,"23":3,"12":1,"17":8,"10":1,"14":2,"13":2,"15":1,"11":1},"DPW-Trakster Key":{"19":1,"20":1}},"source_by_dow":{"Web":{"3":225,"4":205,"6":233,"0":228,"1":220,"2":206,"5":161},"Android":{"3":8,"2":7,"5":19,"4":16,"0":12,"1":14,"6":15},"Android Browser":{"3":40,"2":32,"5":43,"0":23,"1":34,"4":37,"6":42},"Agent":{"3":367,"4":363,"5":267,"6":207,"0":356,"1":362,"2":329},"iOS Browser":{"3":161,"5":274,"4":149,"6":307,"1":151,"2":154,"0":167},"iOS":{"5":64,"3":51,"4":40,"6":74,"0":42,"2":43,"1":37},"AWS Connect - Production":{"3":13,"2":13,"4":14,"1":9,"5":8,"6":9,"0":9},"DPW-Trakster Key":{"1":1,"0":1}}},"all":{"enriched_n":7333,"source_counts":[["Agent",2868],["Web",1791],["iOS Browser",1363],["iOS",459],["Mobile",382],["Android Browser",251],["Android",115],["AWS Connect - Production",75],["IVR",17],["Text-To-311",9],["DPW-Trakster Key",2],["DowntownBid",1]],"origin_counts":[["API",4464],["Phone",2605],["Email",189],["Live Agent",38],["Twitter",37]],"channel_counts":[["Phone / Call center",2943],["Mobile web",1996],["Desktop web",1791],["Native mobile app",574],["Other",29]],"source_by_week":{"2024-W01":{"Web":45,"Agent":67,"Mobile":51,"iOS":13,"Android":2,"IVR":2},"2024-W02":{"Agent":97,"Mobile":45,"Web":35,"iOS":14,"Android":2,"IVR":1},"2024-W03":{"Web":42,"iOS":12,"Agent":58,"Mobile":57,"DowntownBid":1,"Text-To-311":3,"Android":5},"2024-W04":{"Mobile":57,"Agent":89,"iOS":11,"Web":33,"IVR":6,"Android":2},"2024-W05":{"Agent":77,"Mobile":38,"iOS":16,"Web":38,"Android":4,"Text-To-311":1,"IVR":2},"2024-W06":{"Agent":79,"Mobile":38,"iOS":9,"Web":39,"Android":2,"IVR":1},"2024-W07":{"Agent":53,"Mobile":51,"Android":3,"Web":38,"iOS":12,"IVR":2,"Text-To-311":3},"2024-W08":{"Web":29,"Agent":68,"Mobile":38,"iOS":15,"Android":3,"IVR":2},"2024-W09":{"Agent":28,"Web":14,"iOS":6,"Mobile":7,"Text-To-311":2,"IVR":1,"Android":1},"2024-W19":{"Agent":1},"2026-W01":{"Web":29,"Android":2,"Android Browser":8,"Agent":49,"iOS Browser":45,"iOS":9},"2026-W02":{"Web":64,"Agent":107,"iOS Browser":56,"Android Browser":15,"Android":6,"iOS":14},"2026-W03":{"Agent":99,"iOS Browser":43,"Web":60,"iOS":16,"Android Browser":4,"Android":2},"2026-W04":{"iOS Browser":38,"Web":52,"Agent":82,"iOS":7,"Android Browser":7,"Android":3,"DPW-Trakster Key":1},"2026-W05":{"iOS Browser":14,"Web":28,"Agent":18,"Android Browser":2},"2026-W06":{"iOS Browser":78,"Web":57,"Agent":112,"Android Browser":11,"iOS":16,"Android":2},"2026-W07":{"iOS Browser":86,"Web":79,"Agent":151,"iOS":12,"Android Browser":10},"2026-W08":{"Web":77,"iOS Browser":75,"Agent":108,"iOS":16,"Android":7,"Android Browser":8},"2026-W09":{"Agent":94,"iOS Browser":42,"Web":77,"Android Browser":12,"Android":8,"iOS":15},"2026-W10":{"iOS Browser":50,"Agent":75,"Web":56,"Android":4,"Android Browser":14,"iOS":12,"AWS Connect - Production":3,"DPW-Trakster Key":1},"2026-W11":{"Android Browser":10,"iOS":14,"Web":59,"Agent":87,"iOS Browser":56,"AWS Connect - Production":3,"Android":4},"2026-W12":{"Android":3,"Agent":82,"Web":52,"iOS Browser":58,"iOS":25,"AWS Connect - Production":7,"Android Browser":8},"2026-W13":{"iOS Browser":47,"iOS":27,"Web":65,"Agent":76,"Android Browser":7,"Android":4,"AWS Connect - Production":1},"2026-W14":{"iOS":16,"Web":62,"Agent":86,"iOS Browser":60,"Android":1,"AWS Connect - Production":2,"Android Browser":8},"2026-W15":{"Web":51,"iOS Browser":47,"Agent":89,"AWS Connect - Production":3,"Android":4,"Android Browser":10,"iOS":11},"2026-W16":{"Web":58,"iOS Browser":62,"Agent":109,"iOS":12,"AWS Connect - Production":4,"Android":4,"Android Browser":6},"2026-W17":{"iOS":14,"Web":54,"Agent":78,"Android Browser":11,"iOS Browser":59,"Android":5,"AWS Connect - Production":6},"2026-W18":{"Web":55,"iOS":16,"Agent":100,"AWS Connect - Production":4,"iOS Browser":44,"Android Browser":9,"Android":3},"2026-W19":{"iOS":18,"Agent":107,"iOS Browser":65,"Web":55,"AWS Connect - Production":3,"Android Browser":23,"Android":3},"2026-W20":{"Web":63,"iOS Browser":68,"Agent":101,"Android":5,"Android Browser":13,"iOS":11,"AWS Connect - Production":4},"2026-W21":{"iOS Browser":61,"Agent":100,"AWS Connect - Production":5,"Web":80,"Android Browser":12,"iOS":15,"Android":4},"2026-W22":{"Agent":92,"Android":7,"iOS Browser":71,"Web":76,"iOS":13,"AWS Connect - Production":16,"Android Browser":12},"2026-W23":{"AWS Connect - Production":3,"Android Browser":13,"Agent":111,"Web":67,"iOS Browser":64,"iOS":19,"Android":3},"2026-W24":{"Agent":105,"iOS Browser":62,"Web":78,"iOS":19,"AWS Connect - Production":9,"Android Browser":15,"Android":5},"2026-W25":{"Agent":33,"iOS Browser":12,"Web":24,"iOS":4,"AWS Connect - Production":2,"Android Browser":3,"Android":2}},"source_by_service":{"Residential Bulk Collection":{"Web":545,"Agent":641,"Mobile":177,"Android":28,"iOS":130,"Text-To-311":3,"iOS Browser":554,"Android Browser":92},"Tree Pruning":{"iOS":7,"Agent":45,"Web":34,"Mobile":2,"iOS Browser":14,"Android Browser":3,"Android":1},"Trash Collection - Missed":{"Agent":501,"Mobile":91,"Web":202,"iOS":47,"Android":18,"Text-To-311":1,"iOS Browser":220,"Android Browser":36,"AWS Connect - Production":53},"Roadway Signs":{"Web":76,"Android":4,"Agent":121,"iOS":14,"Mobile":4,"Android Browser":6,"iOS Browser":24,"AWS Connect - Production":3},"Pothole":{"Mobile":11,"Agent":99,"iOS":9,"Web":67,"iOS Browser":51,"Android":5,"Android Browser":13},"Container Removal":{"Web":28,"Agent":60,"iOS":4,"Android":4,"Mobile":2,"iOS Browser":11,"Android Browser":4},"Graffiti Removal":{"iOS":15,"Web":14,"Agent":63,"Mobile":1,"iOS Browser":10,"Android Browser":7},"Streetlight Repair Investigation":{"Web":59,"Agent":61,"iOS":16,"Mobile":18,"Text-To-311":1,"Android":4,"iOS Browser":18,"AWS Connect - Production":4,"Android Browser":1},"Leaf Collection Missed":{"iOS":9,"Web":15,"Agent":40,"Mobile":4,"Android":1,"iOS Browser":5,"Android Browser":2},"Traffic Lights and Pedestrian Walk Signals":{"Agent":96,"Web":116,"Mobile":10,"iOS":4,"Android":3,"iOS Browser":25,"Android Browser":4},"Recycling Collection - Missed":{"iOS":47,"Agent":229,"Android":14,"Web":122,"Mobile":16,"Text-To-311":2,"iOS Browser":91,"Android Browser":22},"Tree Planting":{"Agent":64,"Mobile":1,"iOS":8,"iOS Browser":5,"Web":8,"Android Browser":3},"Illegal Poster":{"Mobile":5,"Agent":3,"Web":24,"Android":1,"iOS":2,"iOS Browser":3},"Recycling Cart Repair":{"Agent":9,"Mobile":3,"iOS":5,"Web":16,"iOS Browser":12,"Android Browser":4},"Supercan - Delivery":{"Agent":87,"Web":35,"Mobile":1,"iOS":2,"Android Browser":5,"iOS Browser":12,"Android":1},"Public Space Litter Can Installation":{"Web":4,"Agent":6,"Mobile":1,"iOS":1},"Recycling Cart Delivery":{"Agent":55,"Web":43,"Mobile":1,"iOS":1,"iOS Browser":18,"Android Browser":3},"Trash Cart - Delivery":{"Agent":45,"iOS":2,"Web":27,"iOS Browser":19,"Android":2},"Tree Inspection":{"Agent":92,"iOS":3,"Mobile":1,"Web":26,"iOS Browser":14,"Android":1},"Sidewalk Repair":{"Mobile":4,"Agent":40,"Web":43,"Android":3,"iOS":33,"iOS Browser":23,"Android Browser":4},"Public Space Litter Can Repair":{"iOS":3,"Mobile":1,"Agent":5,"Web":4,"Android Browser":1,"iOS Browser":1},"Parking Meter Repair":{"iOS":2,"IVR":17,"Web":3,"Agent":41,"Mobile":2,"Android Browser":1,"iOS Browser":1},"Alley Repair Investigation":{"Agent":4,"iOS":3,"Web":11,"iOS Browser":2},"Abandoned Bicycle":{"Agent":8,"Web":1},"Dead Animal Collection":{"Mobile":3,"Agent":78,"iOS":15,"Android":5,"Web":21,"iOS Browser":25,"Android Browser":3,"DPW-Trakster Key":1},"Utility Repair Issue":{"Agent":3,"Mobile":2},"Roadway Repair":{"Agent":10,"Web":21,"DowntownBid":1,"iOS":4,"Mobile":1,"iOS Browser":8},"Tree Removal":{"Agent":15,"Mobile":5,"Text-To-311":2,"Web":18,"iOS Browser":8,"iOS":3,"Android Browser":3,"Android":1},"Supercan - Repair":{"Web":12,"Agent":14,"Mobile":1,"iOS Browser":4,"iOS":1,"Android Browser":1},"Bee Treatment and Inspection (DOH)":{"Agent":2},"Bicycle Services":{"Mobile":1,"iOS Browser":7,"Web":4,"Agent":2,"iOS":1,"Android Browser":2},"Pet Waste Complaint":{"Agent":11,"Web":3,"iOS":2,"iOS Browser":9,"Android Browser":2,"Android":1},"DGS - Playground Repair":{"Web":5,"Android":1,"Agent":5,"Mobile":1,"iOS Browser":8,"iOS":2,"Android Browser":1},"Roadway Markings / Pylons":{"Mobile":2,"iOS":4,"Android":1,"Agent":10,"Web":12,"iOS Browser":5},"Litter can - Collection":{"iOS":19,"Agent":39,"Web":13,"Mobile":4,"Android":4,"iOS Browser":21,"Android Browser":4},"Trash Cart Repair":{"Web":18,"iOS":3,"Agent":12,"Mobile":3,"iOS Browser":12,"Android Browser":1},"DC Dog Park Maintenance (DGS)":{"Agent":2,"iOS Browser":1,"iOS":1},"Vacant Lot - Public Property Only":{"Mobile":1,"Agent":10,"iOS":2,"iOS Browser":1,"Android":1},"DC Facilities Landscaping and Grounds Maintenance (DGS)":{"Mobile":1,"Agent":4,"Web":1,"iOS Browser":4,"Android Browser":1},"Public Space Inspection":{"Agent":44,"Mobile":1,"iOS Browser":9,"Web":15,"Android":1,"Android Browser":1,"iOS":2},"Christmas Tree Removal-Missed":{"Agent":29,"iOS Browser":16,"Web":16,"DPW-Trakster Key":1,"Android Browser":2,"iOS":1},"DC Indoor and Outdoor Pool Maintenance  (DGS)":{"iOS Browser":1},"OCTFME - Down Cable Wires":{"Agent":28,"iOS Browser":7,"iOS":3,"Web":5,"Android Browser":1},"Traffic Safety Input":{"Web":23,"Agent":17,"iOS Browser":5,"iOS":3,"Android Browser":1},"Signed Street Sweeping Missed":{"Agent":7,"iOS":2},"Public Space Litter Can Removal":{"Agent":1},"Grass and Weeds Mowing (DPW)":{"Web":1,"Agent":12,"iOS Browser":5,"iOS":1,"Android":1},"Alley Cleaning":{"iOS":9,"Web":9,"iOS Browser":9,"Agent":19,"Android":1,"Android Browser":2},"Illegal Dumping":{"iOS Browser":36,"Web":27,"Agent":23,"Android Browser":2,"Android":7,"AWS Connect - Production":5,"iOS":5},"DC Health Rodent & Vector Control":{"Agent":55,"iOS Browser":28,"AWS Connect - Production":10,"Android Browser":13,"Web":42,"iOS":9},"DGS Overflowing Recycling Can":{"iOS Browser":1,"Web":1},"DC Spray Parks (DGS)":{"Android":1},"Grass Mowing Services Missed (DGS)":{"Agent":1,"Web":1}},"source_by_hour":{"Web":{"14":151,"17":139,"22":99,"18":167,"20":127,"19":135,"16":158,"13":107,"21":133,"4":5,"12":66,"1":57,"0":65,"2":29,"23":86,"15":153,"5":8,"3":26,"11":35,"6":3,"10":13,"7":10,"9":13,"8":6},"Agent":{"13":265,"18":255,"22":133,"19":259,"21":191,"4":9,"15":240,"16":225,"20":249,"14":295,"17":235,"0":79,"1":36,"23":88,"3":26,"9":10,"12":143,"7":1,"10":16,"11":63,"6":8,"5":5,"8":4,"2":33},"Mobile":{"11":9,"13":25,"17":24,"19":27,"22":26,"16":31,"0":17,"3":16,"23":20,"18":21,"14":28,"15":18,"1":21,"2":20,"20":25,"21":26,"12":12,"8":1,"4":8,"6":1,"5":3,"9":2,"10":1},"iOS":{"23":24,"18":28,"17":33,"20":32,"13":28,"1":15,"16":39,"19":33,"0":23,"14":38,"3":8,"22":35,"21":33,"4":5,"15":25,"2":13,"12":32,"7":1,"9":3,"10":5,"11":5,"5":1},"Android":{"19":7,"12":5,"22":9,"2":6,"21":10,"1":4,"16":4,"23":7,"13":11,"14":6,"10":2,"15":7,"6":1,"3":3,"18":7,"5":1,"20":7,"11":5,"0":5,"17":6,"4":1,"7":1},"IVR":{"0":1,"14":3,"17":3,"15":5,"16":2,"18":1,"19":1,"20":1},"DowntownBid":{"17":1},"Text-To-311":{"6":1,"3":1,"1":1,"15":2,"21":2,"19":1,"20":1},"Android Browser":{"13":16,"19":14,"22":24,"15":19,"20":17,"8":2,"2":6,"5":4,"12":6,"21":22,"0":12,"11":9,"18":15,"3":2,"6":2,"17":18,"10":6,"14":20,"1":5,"16":18,"23":11,"7":2,"4":1},"iOS Browser":{"16":89,"8":3,"21":78,"19":87,"11":43,"18":89,"22":99,"15":90,"23":86,"17":93,"7":2,"13":78,"20":102,"3":24,"1":68,"14":93,"0":64,"6":3,"2":42,"12":82,"4":19,"9":7,"10":17,"5":5},"AWS Connect - Production":{"20":14,"19":15,"21":8,"22":6,"18":10,"16":3,"23":3,"12":1,"17":8,"10":1,"14":2,"13":2,"15":1,"11":1},"DPW-Trakster Key":{"19":1,"20":1}},"source_by_dow":{"Web":{"0":284,"1":271,"2":246,"3":260,"4":242,"5":196,"6":292},"Agent":{"0":456,"1":471,"2":440,"3":467,"4":453,"5":323,"6":258},"Mobile":{"0":50,"1":42,"2":30,"3":50,"4":45,"5":63,"6":102},"iOS":{"0":60,"1":52,"2":57,"3":67,"4":53,"5":81,"6":89},"Android":{"0":15,"3":11,"4":23,"1":19,"5":21,"2":11,"6":15},"IVR":{"5":6,"1":2,"3":4,"4":2,"2":2,"6":1},"DowntownBid":{"0":1},"Text-To-311":{"0":3,"3":1,"4":1,"2":1,"5":3},"Android Browser":{"3":40,"2":32,"5":43,"0":23,"1":34,"4":37,"6":42},"iOS Browser":{"3":161,"5":274,"4":149,"6":307,"1":151,"2":154,"0":167},"AWS Connect - Production":{"3":13,"2":13,"4":14,"1":9,"5":8,"6":9,"0":9},"DPW-Trakster Key":{"1":1,"0":1}}}},"enriched_n":7333,"source_counts":[["Agent",2868],["Web",1791],["iOS Browser",1363],["iOS",459],["Mobile",382],["Android Browser",251],["Android",115],["AWS Connect - Production",75],["IVR",17],["Text-To-311",9],["DPW-Trakster Key",2],["DowntownBid",1]],"origin_counts":[["API",4464],["Phone",2605],["Email",189],["Live Agent",38],["Twitter",37]],"channel_counts":[["Phone / Call center",2943],["Mobile web",1996],["Desktop web",1791],["Native mobile app",574],["Other",29]]};
-const C = { phone:'#f6a700', mobileweb:'#4f9cf9', desktopweb:'#22c55e', app:'#a855f7', other:'#64748b' };
-const PALETTE = ['#4f9cf9','#f6a700','#22c55e','#a855f7','#ef4444','#14b8a6','#eab308','#64748b'];
-Chart.defaults.color = '#9aa3b2';
-Chart.defaults.borderColor = '#272b36';
-Chart.defaults.font.family = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif";
+const cssv = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const ACCENT = cssv('--accent') || '#d97e3f';
+const INK2   = cssv('--ink-2')  || '#4a4d52';
+const LINE   = cssv('--line')   || '#d8d4c5';
+const MUTED  = cssv('--muted')  || '#8a8a85';
+// Commodore 64 palette — orange accent + C64 cyan/blue/purple/green/yellow/red
+const C = { phone:ACCENT, mobileweb:'#6abfc6', desktopweb:'#887ecb', app:'#a057a3', other:MUTED };
+const PALETTE = [ACCENT, '#887ecb', '#6abfc6', '#a057a3', '#5cab5e', '#cb7e75', '#c9d487', MUTED];
+Chart.defaults.color = INK2;
+Chart.defaults.borderColor = LINE;
+Chart.defaults.font.family = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
+Chart.defaults.font.size = 11;
 
 const sum = a => a.reduce((s,x)=>s+x,0);
 function pct(n,t){ return t? (100*n/t).toFixed(1)+'%' : '0%'; }
@@ -118,9 +396,9 @@ function renderMethods(year){
   // raw source bar
   METHOD_CHARTS.push(new Chart(document.getElementById('source'), { type:'bar',
     data:{ labels:M.source_counts.map(d=>d[0]),
-      datasets:[{ data:M.source_counts.map(d=>d[1]), backgroundColor:'#4f9cf9' }]},
+      datasets:[{ data:M.source_counts.map(d=>d[1]), backgroundColor:ACCENT }]},
     options:{ indexAxis:'y', maintainAspectRatio:false, plugins:{legend:{display:false}},
-      scales:{x:{grid:{color:'#272b36'}},y:{grid:{display:false}}}}}));
+      scales:{x:{grid:{color:LINE}},y:{grid:{display:false}}}}}));
 
   // origin
   const oTotal = sum(M.origin_counts.map(d=>d[1]));
@@ -146,17 +424,17 @@ function renderMethods(year){
   });
   // diagonal-stripe pattern for the "insufficient data" block
   const hatch=(()=>{ const cv=document.createElement('canvas'); cv.width=cv.height=8;
-    const x=cv.getContext('2d'); x.fillStyle='#262b36'; x.fillRect(0,0,8,8);
-    x.strokeStyle='#4b5466'; x.lineWidth=1.4;
+    const x=cv.getContext('2d'); x.fillStyle=cssv('--cream-2'); x.fillRect(0,0,8,8);
+    x.strokeStyle=MUTED; x.lineWidth=1.4;
     [[-2,2,2,-2],[0,8,8,0],[6,10,10,6]].forEach(s=>{x.beginPath();x.moveTo(s[0],s[1]);x.lineTo(s[2],s[3]);x.stroke();});
     return x.createPattern(cv,'repeat'); })();
   const datasets = chCats.map(c=>({label:c,data:wkData[c],backgroundColor:chMap[c],stack:'s'}));
   datasets.push({label:`Insufficient samples (n<${MIN_N})`,
-    data:low.map(b=>b?100:0), backgroundColor:hatch, borderColor:'#5b647a', borderWidth:1, stack:'s'});
+    data:low.map(b=>b?100:0), backgroundColor:hatch, borderColor:MUTED, borderWidth:1, stack:'s'});
   // on-bar label for the excluded weeks
   const lowLabel={ id:'lowlab', afterDatasetsDraw(ch){
     const {ctx,scales:{x,y}}=ch; ctx.save();
-    ctx.fillStyle='#d7dce8'; ctx.font='600 10px -apple-system,sans-serif'; ctx.textAlign='center';
+    ctx.fillStyle=INK2; ctx.font="600 10px 'JetBrains Mono',monospace"; ctx.textAlign='center';
     weeks.forEach((w,i)=>{ if(!low[i])return;
       const px=x.getPixelForValue(i), py=y.getPixelForValue(50);
       ctx.save(); ctx.translate(px,py); ctx.rotate(-Math.PI/2);
@@ -183,7 +461,7 @@ function renderMethods(year){
         data:svcLabels.map(s=>(M.source_by_service[s]||{})[src]||0),
         backgroundColor:PALETTE[i%PALETTE.length] })) },
     options:{ indexAxis:'y', maintainAspectRatio:false, plugins:{legend:{position:'top'}},
-      scales:{x:{stacked:true,grid:{color:'#272b36'}},y:{stacked:true,grid:{display:false}}}}}));
+      scales:{x:{stacked:true,grid:{color:LINE}},y:{stacked:true,grid:{display:false}}}}}));
 
   // time of day by channel (share within channel)
   const hours=[...Array(24).keys()];
@@ -203,7 +481,7 @@ function renderMethods(year){
     options:{ maintainAspectRatio:false, plugins:{legend:{position:'top'},
       tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw.toFixed(1)}%`}}},
       scales:{x:{title:{display:true,text:'hour (UTC)'},grid:{display:false}},
-        y:{grid:{color:'#272b36'},ticks:{callback:v=>v+'%'}}}}}));
+        y:{grid:{color:LINE},ticks:{callback:v=>v+'%'}}}}}));
 }
 sel.addEventListener('change', e=>renderMethods(e.target.value));
 renderMethods(yopts[0]);
@@ -213,19 +491,19 @@ const yrs = DATA.by_year.map(d=>d[0]);
 new Chart(byyear, { type:'bar',
   data:{ labels:yrs,
     datasets:[{ data:DATA.by_year.map(d=>d[1]),
-      backgroundColor:yrs.map(y=>y===2026?'#f6a700':'#4f9cf9') }]},
+      backgroundColor:yrs.map(y=>y===2026?ACCENT:PALETTE[1]) }]},
   options:{ maintainAspectRatio:false, plugins:{legend:{display:false},
     tooltip:{callbacks:{label:c=>c.raw.toLocaleString()+(c.label==2026?' (partial)':'')}}},
-    scales:{x:{grid:{display:false}},y:{grid:{color:'#272b36'},ticks:{callback:v=>(v/1000)+'k'}}}}});
+    scales:{x:{grid:{display:false}},y:{grid:{color:LINE},ticks:{callback:v=>(v/1000)+'k'}}}}});
 
 // ---- monthly 2026 ----
 new Chart(month2026, { type:'line',
   data:{ labels:DATA.month_2026.map(d=>d[0]),
-    datasets:[{ data:DATA.month_2026.map(d=>d[1]), borderColor:'#f6a700',
-      backgroundColor:'rgba(246,167,0,.15)', fill:true, tension:.25, pointRadius:3 }]},
+    datasets:[{ data:DATA.month_2026.map(d=>d[1]), borderColor:ACCENT,
+      backgroundColor:ACCENT+'26', fill:true, tension:.25, pointRadius:3 }]},
   options:{ maintainAspectRatio:false, plugins:{legend:{display:false},
     tooltip:{callbacks:{label:c=>c.raw.toLocaleString()+' requests'}}},
-    scales:{x:{grid:{display:false}},y:{grid:{color:'#272b36'},ticks:{callback:v=>(v/1000)+'k'}}}}});
+    scales:{x:{grid:{display:false}},y:{grid:{color:LINE},ticks:{callback:v=>(v/1000)+'k'}}}}});
 
 // (method-by-service and time-of-day charts are rendered inside renderMethods, year-aware)
 
