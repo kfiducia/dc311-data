@@ -1,13 +1,13 @@
-service,Agent,Web,iOS Browser,iOS,Android Browser,Android,AWS Connect - Production,DPW-Trakster Key,total
-Residential Bulk Collection,501,426,554,125,92,25,0,0,1723
-Trash Collection - Missed,403,167,220,44,36,17,53,0,940
-Recycling Collection - Missed,174,109,91,29,22,8,0,0,433
-Pothole,86,58,51,6,13,5,0,0,219
-Traffic Lights and Pedestrian Walk Signals,68,111,25,3,4,2,0,0,213
-Roadway Signs,79,62,24,9,6,3,3,0,186
-DC Health Rodent & Vector Control,55,42,28,9,13,0,10,0,157
-Dead Animal Collection,69,18,25,8,3,3,0,1,127
-Supercan - Delivery,71,28,12,1,5,1,0,0,118
-Sidewalk Repair,26,36,23,28,4,1,0,0,118
-Tree Inspection,71,25,14,2,0,1,0,0,113
-Illegal Dumping,23,27,36,5,2,7,5,0,105
+service,Agent,Web,iOS,Mobile,iOS Browser,Portal,API IVR,IVR,Android,SeeClickFix,Android Browser,OUC-Innovations,AWS Connect - Production,Text-To-311,EOM,DowntownBid,DPW-Trakster Key,API BID,API,Testing Class 2,Dept App,JPtest,total
+Residential Bulk Collection,58501,42871,6856,21685,9737,8457,0,0,1544,518,1634,583,0,276,11,0,6,0,0,1,0,0,152680
+Trash Collection - Missed,27702,10833,3589,5194,4928,1044,0,0,746,614,874,212,1179,279,23,0,0,0,0,0,1,0,57218
+Parking Meter Repair,7821,243,450,960,38,735,15983,10697,196,166,10,92,0,110,2,12,0,0,0,0,0,0,37515
+Recycling Collection - Missed,13479,6135,3237,703,2578,399,0,0,756,557,517,94,0,94,1,0,0,0,0,0,0,0,28550
+Streetlight Repair Investigation,10378,4116,2896,1020,301,1096,0,0,566,898,45,199,88,241,59,38,0,1,0,0,0,0,21942
+Pothole,7549,3033,1407,472,761,2437,0,0,533,1229,263,147,0,136,64,46,0,0,2,0,0,0,18079
+Tree Inspection,10914,2137,914,329,239,311,0,0,219,210,42,32,0,0,9,36,0,0,0,0,0,0,15392
+Traffic Lights and Pedestrian Walk Signals,6081,5662,1196,344,654,328,0,0,425,363,127,46,0,0,4,2,0,0,0,0,0,0,15232
+Sidewalk Repair,3599,2739,1743,361,446,589,0,0,375,480,75,59,0,0,126,77,0,2,0,0,0,0,10671
+Dead Animal Collection,5958,1450,1209,437,489,161,0,0,347,190,136,48,0,0,1,0,5,0,0,0,0,0,10431
+Tree Pruning,4499,2653,1289,447,343,436,0,0,324,239,72,23,0,0,26,0,0,0,0,0,0,0,10351
+Supercan - Delivery,6461,1591,251,160,257,116,0,0,57,12,72,20,0,0,1,0,0,0,0,0,0,0,8998

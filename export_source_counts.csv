@@ -1,9 +1,23 @@
 source,samples
-Agent,2251
-Web,1478
-iOS Browser,1363
-iOS,351
-Android Browser,251
-Android,91
-AWS Connect - Production,75
-DPW-Trakster Key,2
+Agent,220632
+Web,111916
+iOS,37897
+Mobile,36284
+iOS Browser,27356
+Portal,20505
+API IVR,15983
+IVR,10697
+Android,9963
+SeeClickFix,8563
+Android Browser,5371
+OUC-Innovations,2104
+AWS Connect - Production,1679
+Text-To-311,1309
+EOM,662
+DowntownBid,238
+DPW-Trakster Key,27
+API BID,5
+API,3
+Testing Class 2,1
+Dept App,1
+JPtest,1
