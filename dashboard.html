@@ -48,7 +48,7 @@
   <div class="card"><h2>How requests are submitted</h2><p>Channel families &mdash; enriched 2026 sample</p><div class="wrap"><canvas id="channel"></canvas></div></div>
   <div class="card"><h2>Raw source values</h2><p>Exact <code>source</code> field, enriched 2026 sample</p><div class="wrap"><canvas id="source"></canvas></div></div>
   <div class="card"><h2>Origin (system of record)</h2><p><code>origin</code> field</p><div class="wrap"><canvas id="origin"></canvas></div></div>
-  <div class="card"><h2>Channel mix over time (2026)</h2><p>Weekly share by channel. <b>Hatched bars = weeks with too few samples (n&lt;120), excluded</b></p><div class="wrap"><canvas id="mixweek"></canvas></div></div>
+  <div class="card"><h2>Channel mix over time (2026)</h2><p>Weekly share by channel. <b>Hatched bars = weeks with insufficient samples (n&lt;120)</b></p><div class="wrap"><canvas id="mixweek"></canvas></div></div>
   <div class="card wide"><h2>Submission rate &mdash; volume by year</h2><p>All requests, full bulk dataset 2009&ndash;2026 (2026 partial &mdash; through mid-June)</p><div class="wrap"><canvas id="byyear"></canvas></div></div>
   <div class="card wide"><h2>Submission rate &mdash; monthly volume (2026)</h2><p>Requests created per month this year</p><div class="wrap"><canvas id="month2026"></canvas></div></div>
   <div class="card"><h2>Method by service type</h2><p>Source mix for the top service categories</p><div class="wrap"><canvas id="bysvc"></canvas></div></div>
@@ -151,7 +151,7 @@ function renderMethods(year){
     [[-2,2,2,-2],[0,8,8,0],[6,10,10,6]].forEach(s=>{x.beginPath();x.moveTo(s[0],s[1]);x.lineTo(s[2],s[3]);x.stroke();});
     return x.createPattern(cv,'repeat'); })();
   const datasets = chCats.map(c=>({label:c,data:wkData[c],backgroundColor:chMap[c],stack:'s'}));
-  datasets.push({label:`Too few samples (n<${MIN_N})`,
+  datasets.push({label:`Insufficient samples (n<${MIN_N})`,
     data:low.map(b=>b?100:0), backgroundColor:hatch, borderColor:'#5b647a', borderWidth:1, stack:'s'});
   // on-bar label for the excluded weeks
   const lowLabel={ id:'lowlab', afterDatasetsDraw(ch){
@@ -160,7 +160,7 @@ function renderMethods(year){
     weeks.forEach((w,i)=>{ if(!low[i])return;
       const px=x.getPixelForValue(i), py=y.getPixelForValue(50);
       ctx.save(); ctx.translate(px,py); ctx.rotate(-Math.PI/2);
-      ctx.fillText(`too few · n=${wkN[i]}`,0,0); ctx.restore(); });
+      ctx.fillText(`insufficient samples (n=${wkN[i]})`,0,0); ctx.restore(); });
     ctx.restore(); } };
   METHOD_CHARTS.push(new Chart(document.getElementById('mixweek'), { type:'bar',
     data:{ labels:weeks.map(w=>w.slice(2)), datasets },
@@ -168,7 +168,9 @@ function renderMethods(year){
     options:{ maintainAspectRatio:false, plugins:{legend:{position:'top'},
       tooltip:{callbacks:{
         title:items=>`${items[0].label}  (n=${wkN[items[0].dataIndex]})`,
-        label:c=> low[c.dataIndex] ? 'Under-sampled week — excluded from mix' : `${c.dataset.label}: ${c.raw.toFixed(0)}%`}}},
+        label:c=> low[c.dataIndex]
+          ? ['This week is significantly under-represented','compared to other weeks, so it may not','accurately reflect the full channel mix.']
+          : `${c.dataset.label}: ${c.raw.toFixed(0)}%`}}},
       scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,max:100,ticks:{callback:v=>v+'%'}}}}}));
 
   // method by service (top services, stacked by source)
