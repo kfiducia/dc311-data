@@ -515,7 +515,7 @@ function renderMethods(year){
   const hl = (DATA.hour_local_by_year && DATA.hour_local_by_year[year]) || [];
   const htot = sum(hl) || 1;
   // backbone: exact all-requests envelope from bulk (neutral grey), DC local
-  const datasets=[{ label:'all requests (exact)', data:hl.map(n=>100*n/htot),
+  const hourDatasets=[{ label:'all requests (exact)', data:hl.map(n=>100*n/htot),
     borderColor:MUTED, backgroundColor:INK2+'1a', fill:true,
     tension:.35, pointRadius:0, borderWidth:2.5 }];
   // overlay per-channel shape ONLY for intraday-unbiased (by-id) years
@@ -527,12 +527,12 @@ function renderMethods(year){
       const c=chOf(s); Object.entries(hc).forEach(([h,n])=>chHour[c][+h]+=n);
     });
     chCats.forEach(c=>{ const t=sum(chHour[c]); if(t<50) return;
-      datasets.push({ label:c, data:chHour[c].map(n=>100*n/t), borderColor:chMap[c],
+      hourDatasets.push({ label:c, data:chHour[c].map(n=>100*n/t), borderColor:chMap[c],
         backgroundColor:'transparent', fill:false, tension:.35, pointRadius:0, borderWidth:1.75 });
     });
   }
   METHOD_CHARTS.push(new Chart(document.getElementById('byhour'), { type:'line',
-    data:{ labels:hours.map(fmtHr), datasets },
+    data:{ labels:hours.map(fmtHr), datasets:hourDatasets },
     options:{ maintainAspectRatio:false, plugins:{legend:{display:showLegend, position:'top'},
       tooltip:{callbacks:{
         title:items=>`${items[0].label} (DC local)`,
