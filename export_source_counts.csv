@@ -1,23 +1,24 @@
-source,samples
-Agent,220632
-Web,111916
-iOS,37897
-Mobile,36284
-iOS Browser,27356
-Portal,20505
-API IVR,15983
-IVR,10697
-Android,9963
-SeeClickFix,8563
-Android Browser,5371
-OUC-Innovations,2104
-AWS Connect - Production,1679
-Text-To-311,1309
-EOM,662
-DowntownBid,238
+source,count
+Agent,506910
+Web,197957
+Mobile,99968
+iOS,70006
+Portal,60408
+API IVR,49211
+iOS Browser,31533
+SeeClickFix,19916
+IVR,19865
+Android,18872
+OUC-Innovations,8070
+Android Browser,6060
+Text-To-311,3258
+EOM,2751
+AWS Connect - Production,2159
+DowntownBid,477
+API BID,246
 DPW-Trakster Key,27
-API BID,5
 API,3
-Testing Class 2,1
+Testing Class 2,2
+DC Council,1
 Dept App,1
 JPtest,1

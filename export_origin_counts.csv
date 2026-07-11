@@ -1,12 +1,13 @@
-origin,samples
-API,239714
-Phone,199632
-311-API,26246
-Web,21281
-Email,15217
-311-App,4108
-Twitter,3847
-Live Agent,1113
-Internal Transfer,24
-Text to 311,11
-Unknown,4
+origin,count
+Phone,458993
+API,442908
+311-API,79428
+Web,61463
+Email,34963
+Twitter,8243
+311-App,8150
+Live Agent,2672
+Internal Transfer,855
+Text to 311,18
+Unknown,8
+Facebook,1

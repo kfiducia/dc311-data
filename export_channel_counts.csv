@@ -1,5 +1,5 @@
-channel,samples
-Phone / Call center,248991
-Desktop web,132421
-Mobile (app + web),116871
-Other,12914
+channel,count
+Phone / Call center,578145
+Desktop web,258365
+Mobile (app + web),226439
+Other,34753
