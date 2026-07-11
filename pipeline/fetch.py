@@ -1,0 +1,117 @@
+"""Pull raw 311 records for the configured signal from DC's ArcGIS API.
+
+Writes one tidy CSV: data/raw/<signal>_reports.csv  (date_iso, lat, lon, ward)
+Paginates each per-year layer at 1000 rows/request. Idempotent: safe to rerun.
+"""
+import csv
+import json
+import sys
+import time
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+import config as C
+
+RAW = Path(__file__).resolve().parent.parent / "data" / "raw"
+RAW.mkdir(parents=True, exist_ok=True)
+
+
+def _get(url, params):
+    q = urllib.parse.urlencode(params)
+    for attempt in range(6):
+        try:
+            with urllib.request.urlopen(f"{url}?{q}", timeout=120) as r:
+                return json.load(r)
+        except Exception as e:  # noqa: BLE001 - simple retry
+            if attempt == 5:
+                raise
+            print(f"  retry {attempt+1} ({e})", file=sys.stderr)
+            time.sleep(3 * (attempt + 1))
+
+
+def year_layers():
+    """Map each year -> layer id by parsing the MapServer's layer list."""
+    meta = _get(C.ARCGIS_SERVICE, {"f": "json"})
+    out = {}
+    for lyr in meta["layers"]:
+        name = lyr["name"]  # e.g. "All Service Requests - 2025"
+        if name.startswith("All Service Requests - "):
+            tail = name.rsplit("-", 1)[-1].strip()
+            if tail.isdigit():
+                out[int(tail)] = lyr["id"]
+    return out
+
+
+def fetch_year(layer_id, year):
+    rows, offset = [], 0
+    where = f"SERVICECODE='{C.SERVICE_CODE}'"
+    while True:
+        data = _get(
+            f"{C.ARCGIS_SERVICE}/{layer_id}/query",
+            {
+                "where": where,
+                "outFields": "ADDDATE,RESOLUTIONDATE,LATITUDE,LONGITUDE,WARD",
+                "returnGeometry": "false",
+                "resultOffset": offset,
+                "resultRecordCount": 1000,
+                "orderByFields": "ADDDATE",
+                "f": "json",
+            },
+        )
+        feats = data.get("features", [])
+        if not feats:
+            break
+        for f in feats:
+            a = f["attributes"]
+            ms, lat, lon = a.get("ADDDATE"), a.get("LATITUDE"), a.get("LONGITUDE")
+            if ms is None or lat is None or lon is None:
+                continue
+            d = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).date()
+            rms = a.get("RESOLUTIONDATE")
+            resolved = (datetime.fromtimestamp(rms / 1000, tz=timezone.utc).date()
+                        .isoformat() if rms else "")
+            rows.append((d.isoformat(), f"{lat:.6f}", f"{lon:.6f}",
+                         a.get("WARD") or "", resolved))
+        offset += len(feats)
+        print(f"  {year}: {offset} rows", file=sys.stderr)
+        if len(feats) < 1000:
+            break
+    return rows
+
+
+def main():
+    layers = year_layers()
+    years = sorted(y for y in layers if y >= C.START_YEAR)
+    print(f"Fetching {C.SIGNAL_KEY} ({C.SERVICE_CODE}) for years {years[0]}-{years[-1]}")
+
+    # checkpoint each year to its own file so a stall never loses prior work;
+    # reruns skip years already on disk.
+    for y in years:
+        part = RAW / f"_{C.SIGNAL_KEY}_{y}.csv"
+        if part.exists():
+            print(f"  {y}: cached", file=sys.stderr)
+            continue
+        rows = fetch_year(layers[y], y)
+        with part.open("w", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerows(rows)
+        print(f"  {y}: wrote {len(rows):,}", file=sys.stderr)
+
+    # combine
+    all_rows = []
+    for y in years:
+        part = RAW / f"_{C.SIGNAL_KEY}_{y}.csv"
+        all_rows += list(csv.reader(part.open()))
+    all_rows.sort()
+    out = RAW / f"{C.SIGNAL_KEY}_reports.csv"
+    with out.open("w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["date", "lat", "lon", "ward", "resolved"])
+        w.writerows(all_rows)
+    print(f"Wrote {len(all_rows):,} rows -> {out}")
+
+
+if __name__ == "__main__":
+    main()
