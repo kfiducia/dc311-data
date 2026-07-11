@@ -44,9 +44,9 @@ def year_layers():
     return out
 
 
-def fetch_year(layer_id, year):
+def fetch_year(layer_id, year, service_code):
     rows, offset = [], 0
-    where = f"SERVICECODE='{C.SERVICE_CODE}'"
+    where = f"SERVICECODE='{service_code}'"
     while True:
         data = _get(
             f"{C.ARCGIS_SERVICE}/{layer_id}/query",
@@ -81,36 +81,39 @@ def fetch_year(layer_id, year):
     return rows
 
 
-def main():
-    layers = year_layers()
-    years = sorted(y for y in layers if y >= C.START_YEAR)
-    print(f"Fetching {C.SIGNAL_KEY} ({C.SERVICE_CODE}) for years {years[0]}-{years[-1]}")
-
-    # checkpoint each year to its own file so a stall never loses prior work;
-    # reruns skip years already on disk.
+def fetch_signal(key, service_code, layers, years):
+    """Fetch one service code across all years -> data/raw/<key>_reports.csv.
+    Checkpoints each year so a stall never loses prior work; reruns skip cached."""
+    print(f"Fetching {key} ({service_code}) for years {years[0]}-{years[-1]}")
     for y in years:
-        part = RAW / f"_{C.SIGNAL_KEY}_{y}.csv"
+        part = RAW / f"_{key}_{y}.csv"
         if part.exists():
             print(f"  {y}: cached", file=sys.stderr)
             continue
-        rows = fetch_year(layers[y], y)
+        rows = fetch_year(layers[y], y, service_code)
         with part.open("w", newline="") as fh:
-            w = csv.writer(fh)
-            w.writerows(rows)
+            csv.writer(fh).writerows(rows)
         print(f"  {y}: wrote {len(rows):,}", file=sys.stderr)
 
-    # combine
     all_rows = []
     for y in years:
-        part = RAW / f"_{C.SIGNAL_KEY}_{y}.csv"
-        all_rows += list(csv.reader(part.open()))
+        all_rows += list(csv.reader((RAW / f"_{key}_{y}.csv").open()))
     all_rows.sort()
-    out = RAW / f"{C.SIGNAL_KEY}_reports.csv"
+    out = RAW / f"{key}_reports.csv"
     with out.open("w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(["date", "lat", "lon", "ward", "resolved"])
         w.writerows(all_rows)
     print(f"Wrote {len(all_rows):,} rows -> {out}")
+
+
+def main():
+    layers = year_layers()
+    years = sorted(y for y in layers if y >= C.START_YEAR)
+    signals = [(C.SIGNAL_KEY, C.SERVICE_CODE)] + \
+        [(a["key"], a["service_code"]) for a in getattr(C, "AUX_SIGNALS", [])]
+    for key, code in signals:
+        fetch_signal(key, code, layers, years)
 
 
 if __name__ == "__main__":

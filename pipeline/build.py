@@ -259,6 +259,32 @@ def main():
                 c[widx[wk]] += v
         return c
 
+    # auxiliary corroborating signals (e.g. dead-animal pickups): weekly counts
+    # per hex + citywide, bucketed into the SAME res-8 grid. Overlaid, not detected.
+    aux_hex, aux_city, aux_meta = {}, {}, []
+    for a in getattr(C, "AUX_SIGNALS", []):
+        path = RAW / f"{a['key']}_reports.csv"
+        if not path.exists():
+            continue
+        by_cell = defaultdict(lambda: defaultdict(int))
+        for r in csv.DictReader(path.open()):
+            try:
+                lat, lon = float(r["lat"]), float(r["lon"])
+                d = date.fromisoformat(r["date"])
+            except (ValueError, KeyError):
+                continue
+            if not (38.7 < lat < 39.05 and -77.15 < lon < -76.85):
+                continue
+            by_cell[h3.latlng_to_cell(lat, lon, C.H3_RES)][week_monday(d)] += 1
+        aux_hex[a["key"]] = {cell: series_for(wm) for cell, wm in by_cell.items()}
+        city = [0] * len(weeks)
+        for s in aux_hex[a["key"]].values():
+            for i in range(len(weeks)):
+                city[i] += s[i]
+        aux_city[a["key"]] = city
+        aux_meta.append({"key": a["key"], "label": a["label"], "total": sum(city)})
+        print(f"  aux '{a['key']}': {sum(city):,} reports")
+
     # per-hex units (the detection + map unit)
     units = []
     for cell in hex_center:
@@ -279,6 +305,7 @@ def main():
             "alert_weeks": [i for i, a in enumerate(alert) if a],
             "episodes": eps,
             "abatement": abatement(counts, resolved, expected),
+            "aux": {k: aux_hex[k].get(cell, [0] * len(weeks)) for k in aux_hex},
         })
 
     # citywide roll-up (for the abatement headline + context)
@@ -321,7 +348,9 @@ def main():
         "detector": {"alert_z": C.ALERT_Z, "persist_z": C.PERSIST_Z,
                      "persist_weeks": C.PERSIST_WEEKS},
         "city": {"counts": city_counts, "resolved": city_res,
-                 "expected": city_exp, "abatement": city_abate, "close": close},
+                 "expected": city_exp, "abatement": city_abate, "close": close,
+                 "aux": aux_city},
+        "aux_signals": aux_meta,
         "units": units,
         "heat": heat,
     }

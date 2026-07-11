@@ -10,6 +10,12 @@ SIGNAL_KEY = "rodent"
 SIGNAL_LABEL = "Rodent (rat) reports"
 SERVICE_CODE = "S0311"  # "Rodent Inspection and Treatment"
 
+# --- Corroborating signals: fetched + overlaid on the timeline (not detected on).
+# Dead-animal pickups track rat activity (poisoning die-off, carcasses). ---
+AUX_SIGNALS = [
+    {"key": "dead_animal", "label": "Dead-animal pickups", "service_code": "11"},
+]
+
 # --- History window for seasonal baselines ---
 START_YEAR = 2018  # earliest year to pull; more history = better seasonality
 

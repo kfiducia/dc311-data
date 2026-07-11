@@ -18,14 +18,14 @@
 <style>
   :root{
     --cream:#f3efe2;--cream-2:#ecead9;--ink:#1c1f24;--ink-2:#4a4d52;--muted:#8a8a85;
-    --line:#d8d4c5;--accent:#d97e3f;--alert:#c0392b;--close:#3d7d8c;--good:#3f8f5b;
+    --line:#d8d4c5;--accent:#d97e3f;--alert:#c0392b;--close:#3d7d8c;--good:#3f8f5b;--dead:#7b5ea7;
     --crt:rgba(28,31,36,0.04);--nav-bg:rgba(244,241,232,0.92);--card:rgba(255,255,255,0.45);
     --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;--display:'VT323','JetBrains Mono',monospace;
     color-scheme:light;
   }
   @media (prefers-color-scheme:dark){:root{
     --cream:#15181d;--cream-2:#1d2025;--ink:#ece8d8;--ink-2:#b5b1a4;--muted:#6f6f68;
-    --line:#2c2f36;--accent:#e88a48;--alert:#e05a4a;--close:#57a3b5;--good:#5cb87e;
+    --line:#2c2f36;--accent:#e88a48;--alert:#e05a4a;--close:#57a3b5;--good:#5cb87e;--dead:#a98fd0;
     --crt:rgba(255,255,255,0.025);--nav-bg:rgba(21,24,29,0.92);--card:rgba(255,255,255,0.04);color-scheme:dark;
   }}
   *,*::before,*::after{box-sizing:border-box}
@@ -100,7 +100,12 @@
   .rangebtns button{font-family:var(--mono);font-size:11px;border:1px solid var(--line);background:transparent;color:var(--ink-2);border-radius:3px;padding:3px 9px;cursor:pointer}
   .rangebtns button.on{border-color:var(--accent);color:var(--accent)}
   .chartbox{position:relative;height:230px;margin-top:2px}
+  .chartcap{font-size:11px;color:var(--muted);margin:6px 0 0}
+  .chartcap b{color:var(--dead)}
   #tl{width:100%!important;height:100%!important}
+  .corr{margin:10px 0 2px;border:1px solid var(--line);border-left:3px solid var(--dead);border-radius:0 3px 3px 0;padding:8px 11px;background:var(--card);font-size:12px}
+  .corr b{font-family:var(--display);font-size:16px;color:var(--dead)}
+  .corr .rnum{color:var(--dead);font-weight:600}
   .abate{margin:10px 0 2px;border:1px solid var(--line);border-left:3px solid var(--close);border-radius:0 3px 3px 0;padding:8px 11px;background:var(--card);font-size:12px}
   .abate b{font-family:var(--display);font-size:16px}
   .abate .cool{color:var(--good)}.abate .rise{color:var(--alert)}.abate .flat{color:var(--muted)}
@@ -185,6 +190,8 @@
         <button data-r="13">90 days</button><button data-r="52">1 year</button><button data-r="0" class="on">All</button>
       </div>
       <div class="chartbox"><canvas id="tl"></canvas></div>
+      <p class="chartcap" id="chartcap"></p>
+      <div class="corr" id="corr"></div>
       <div class="abate" id="abate"></div>
       <div class="eps" id="eps"></div>
     </div>
@@ -222,6 +229,10 @@ const mono=getComputedStyle(document.body).getPropertyValue('--mono');
 const cssv=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const dateShort=iso=>{const d=new Date(iso+'T00:00');return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});};
 const RECENT=13, MOM=4;
+function pearson(a,b){const n=Math.min(a.length,b.length);let sa=0,sb=0;
+  for(let i=0;i<n;i++){sa+=a[i];sb+=b[i];}const ma=sa/n,mb=sb/n;let c=0,va=0,vb=0;
+  for(let i=0;i<n;i++){const x=a[i]-ma,y=b[i]-mb;c+=x*y;va+=x*x;vb+=y*y;}
+  return (va&&vb)?c/Math.sqrt(va*vb):0;}
 
 fetch('agg/rodent_alerts.json').then(r=>r.json()).then(init);
 
@@ -234,6 +245,13 @@ function init(data){
     'Detection unit: H3 hex, labeled by neighborhood · '+data.units.length+' active hexes · data through week of '+dateShort(A.weeks.at(-1));
 
   data.units.forEach(u=>u._m=metrics(u));
+  // dead-animal (aux) corroborating signal
+  A.aux0=(data.aux_signals||[])[0];
+  if(A.aux0){
+    A.corrCity=pearson(data.city.counts, data.city.aux[A.aux0.key]);
+    document.getElementById('chartcap').innerHTML=
+      `<b>${A.aux0.label}</b> shown on the right axis (purple).`;
+  }
   buildImpact(); buildStatband(); buildBoard(); buildMap(); buildUnitSelect(); wireRange();
 
   // default: hottest-right-now hex
@@ -416,7 +434,25 @@ function selectUnit(id){
   document.getElementById('kNow').textContent=fmt(u._m.recent);
   document.getElementById('kVs').textContent=(u._m.hot>=1?'+':'')+Math.round((u._m.hot-1)*100)+'%';
   document.getElementById('kLead').textContent=u._m.bestLead+'w';
-  renderChart(u); renderAbate(u); renderEpisodes(u);
+  renderChart(u); renderCorr(u); renderAbate(u); renderEpisodes(u);
+}
+function rollsum(a,w){return a.map((_,i)=>{let s=0;for(let k=Math.max(0,i-w+1);k<=i;k++)s+=a[k];return s;});}
+function renderCorr(u){
+  const box=document.getElementById('corr');
+  if(!A.aux0||!u.aux||!u.aux[A.aux0.key]){box.style.display='none';return;}
+  box.style.display='';
+  const name=A.aux0.label.toLowerCase(), dead=u.aux[A.aux0.key];
+  const total=dead.reduce((s,x)=>s+x,0), rc=A.corrCity.toFixed(2);
+  if(total<40){
+    box.innerHTML=`<b>Corroboration.</b> Too few ${name} in this hex to correlate locally — but <span class="rnum">citywide they track rat reports strongly (r=${rc})</span>, an independent read on rat pressure.`;
+    return;
+  }
+  const r=pearson(rollsum(u.counts,4),rollsum(dead,4));
+  const how=r>=0.5?'rise and fall together':r>=0.25?'loosely track each other':'show little local link';
+  box.innerHTML=`<b>Corroboration.</b> Here, ${name} and rat reports ${how}
+    (<span class="rnum">r=${r.toFixed(2)}</span>; citywide r=${rc}). Dead-animal pickups are a
+    second, independent signal of rat pressure — die-off from baiting and uncollected carcasses —
+    so overlapping peaks raise confidence a spike is real.`;
 }
 function renderAbate(u){
   const a=u.abatement||A.data.city.abatement; const scope=u.abatement?'here':'citywide';
@@ -451,9 +487,14 @@ function renderChart(u){
   const labels=A.weeks, alertSet=new Set(u.alert_weeks);
   const alertPts=labels.map((_,i)=>alertSet.has(i)?u.counts[i]:null);
   if(A.chart)A.chart.destroy();
+  const auxDs=(A.data.aux_signals||[]).map(a=>({
+    type:'line',label:a.label.toLowerCase(),data:(u.aux&&u.aux[a.key])||[],
+    borderColor:cssv('--dead'),borderWidth:1.1,pointRadius:0,tension:.35,
+    yAxisID:'y1',order:4}));
   A.chart=new Chart(document.getElementById('tl'),{
     data:{labels,datasets:[
       {type:'line',label:'closures',data:u.resolved,borderColor:'transparent',backgroundColor:cssv('--close')+'22',fill:true,pointRadius:0,tension:.25,order:5},
+      ...auxDs,
       {type:'line',label:'reports',data:u.counts,borderColor:cssv('--ink'),borderWidth:1.4,pointRadius:0,tension:.25,order:3},
       {type:'line',label:'expected',data:u.expected,borderColor:cssv('--accent'),borderWidth:1.2,borderDash:[4,3],pointRadius:0,spanGaps:true,tension:.25,order:2},
       {type:'scatter',label:'spike alert',data:alertPts,borderColor:cssv('--alert'),backgroundColor:cssv('--alert'),pointRadius:3.2,order:1},
@@ -461,7 +502,9 @@ function renderChart(u){
     options:{responsive:true,maintainAspectRatio:false,animation:false,interaction:{mode:'index',intersect:false},
       scales:{x:{type:'category',min:0,max:A.nEnd,grid:{display:false},
         ticks:{maxTicksLimit:7,color:cssv('--muted'),font:{family:mono,size:10},callback:function(v){const d=this.getLabelForValue(v);return d?d.slice(0,7):'';}}},
-        y:{beginAtZero:true,ticks:{color:cssv('--muted'),font:{family:mono,size:10}},grid:{color:cssv('--line')}}},
+        y:{beginAtZero:true,ticks:{color:cssv('--muted'),font:{family:mono,size:10}},grid:{color:cssv('--line')}},
+        y1:{position:'right',beginAtZero:true,grid:{display:false},
+          ticks:{color:cssv('--dead'),font:{family:mono,size:9},maxTicksLimit:4}}},
       plugins:{legend:{labels:{color:cssv('--ink-2'),font:{family:mono,size:10},boxWidth:12}},
         tooltip:{callbacks:{title:it=>'wk of '+dateShort(labels[it[0].dataIndex])}}}}
   });
