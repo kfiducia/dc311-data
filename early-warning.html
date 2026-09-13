@@ -384,8 +384,8 @@ function heatColor(t){const s=[[236,234,217],[232,184,75],[224,123,57],[192,57,4
   return `rgb(${a.map((v,k)=>Math.round(v+(b[k]-v)*f)).join(',')})`;}
 function buildMap(){
   const map=L.map('map',{scrollWheelZoom:false}).setView([38.905,-76.99],12); A.map=map;
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',
-    {attribution:'© OpenStreetMap © CARTO',subdomains:'abcd',maxZoom:19}).addTo(map);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    {attribution:'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',maxZoom:16}).addTo(map);
 
   A.unitLayer=L.layerGroup(); A.polyOf={};
   const maxEps=Math.max(1,...A.data.units.map(u=>u.episodes.length));
