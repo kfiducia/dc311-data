@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DC 311 — By Single Member District</title>
+<meta name="description" content="DC 311 service requests ranked by ANC Single Member District (SMD), filterable by service type and year.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://kfiducia.github.io/dc311-data/">
+<meta property="og:title" content="DC 311 — By Single Member District">
+<meta property="og:description" content="DC 311 service requests ranked by ANC Single Member District (SMD).">
+<meta property="og:image" content="https://kfiducia.github.io/dc311-data/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="DC 311 — By Single Member District">
+<meta name="twitter:description" content="DC 311 service requests ranked by SMD.">
+<meta name="twitter:image" content="https://kfiducia.github.io/dc311-data/og.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&family=VT323&display=swap" rel="stylesheet">
+<script src="chart.umd.min.js"></script>
+<style>
+  :root {
+    --cream: #f3efe2;
+    --cream-2: #ecead9;
+    --ink: #1c1f24;
+    --ink-2: #4a4d52;
+    --muted: #8a8a85;
+    --line: #d8d4c5;
+    --accent: #d97e3f;
+    --crt: rgba(28, 31, 36, 0.04);
+    --nav-bg: rgba(244, 241, 232, 0.92);
+    --flag-bg: rgba(255, 255, 255, 0.4);
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --display: 'VT323', 'JetBrains Mono', monospace;
+    --ease: cubic-bezier(.2,.6,.2,1);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --cream: #15181d;
+      --cream-2: #1d2025;
+      --ink: #ece8d8;
+      --ink-2: #b5b1a4;
+      --muted: #6f6f68;
+      --line: #2c2f36;
+      --accent: #e88a48;
+      --crt: rgba(255, 255, 255, 0.025);
+      --nav-bg: rgba(21, 24, 29, 0.92);
+      --flag-bg: rgba(255, 255, 255, 0.04);
+      color-scheme: dark;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--cream);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    background-image: repeating-linear-gradient(
+      to bottom, transparent 0, transparent 2px, var(--crt) 2px, var(--crt) 3px);
+  }
+  a { color: inherit; text-decoration: none; }
+  ::selection { background: var(--accent); color: var(--cream); }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 0 clamp(1.25rem, 3vw, 2.5rem); }
+
+  /* ─── Nav ─── */
+  .nav { position: sticky; top: 0; z-index: 50; background: var(--nav-bg);
+    backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  .nav-inner { max-width: 1280px; margin: 0 auto;
+    padding: 0.9rem clamp(1.25rem, 3vw, 2.5rem);
+    display: flex; justify-content: space-between; align-items: center; }
+  .nav-back { font-family: var(--mono); font-weight: 700; font-size: .72rem;
+    letter-spacing: .1em; text-transform: lowercase; color: var(--ink-2);
+    transition: color .2s var(--ease); }
+  .nav-back::before { content: "← "; color: var(--accent); }
+  .nav-back:hover { color: var(--accent); }
+  .nav-tag { font-family: var(--mono); font-size: .68rem; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--muted); }
+  .nav-tag::before { content: "// "; color: var(--accent); opacity: .8; }
+
+  /* ─── Header ─── */
+  header.page { padding: clamp(2.5rem, 5vw, 4rem) 0 1.5rem; }
+  .label-stack { font-family: var(--display); font-weight: 400; line-height: .9;
+    color: var(--ink); margin: 0; }
+  .label-stack::before { content: ">_"; display: block; font-family: var(--mono);
+    font-size: .72rem; letter-spacing: .12em; color: var(--accent);
+    font-weight: 600; margin-bottom: .65rem; }
+  .label-stack .top { display: block; opacity: .55; font-size: clamp(2rem, 4vw, 3rem); }
+  .label-stack .bot { display: block; font-size: clamp(2.4rem, 5vw, 3.8rem); }
+  .sub { margin-top: 1.1rem; font-family: var(--mono); font-size: .8rem;
+    color: var(--ink-2); max-width: 80ch; line-height: 1.65; }
+  .sub::before { content: "// "; color: var(--accent); opacity: .8; }
+  .prov { margin-top: .8rem; font-family: var(--mono); font-size: .68rem;
+    color: var(--muted); max-width: 92ch; line-height: 1.6; }
+  .prov code { background: var(--cream-2); padding: 1px 5px; border: 1px solid var(--line); }
+
+  /* ─── Controls ─── */
+  .controls { margin-top: 1.5rem; padding: .85rem 1.1rem; border: 1px solid var(--line);
+    border-left: 3px solid var(--accent); background: var(--flag-bg);
+    display: flex; align-items: center; gap: 1.1rem; flex-wrap: wrap; }
+  .controls .l { font-family: var(--mono); font-weight: 600; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--ink-2); font-size: .68rem; }
+  .controls .l::before { content: ">"; color: var(--accent); margin-right: .4rem; }
+  .controls label.chk { display: inline-flex; align-items: center; gap: .4rem;
+    font-size: .72rem; color: var(--ink-2); cursor: pointer; }
+  select { background: var(--cream-2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 0; padding: .35rem .65rem; font-family: var(--mono);
+    font-size: .72rem; font-weight: 600; letter-spacing: .06em; cursor: pointer; }
+  select:focus { outline: 1.5px solid var(--accent); outline-offset: 1px; }
+
+  /* ─── Chart card ─── */
+  .card { margin: 1.5rem 0 1rem; border: 1px solid var(--line);
+    padding: 1.25rem 1.35rem 1.5rem; }
+  .card h2 { margin: 0 0 .35rem; font-family: var(--display); font-weight: 400;
+    font-size: 1.5rem; color: var(--ink); line-height: 1.05; }
+  .card h2::before { content: "// "; color: var(--accent); opacity: .8;
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .12em;
+    vertical-align: middle; margin-right: .25rem; }
+  .card p { margin: 0 0 .9rem; font-family: var(--mono); font-size: .72rem;
+    letter-spacing: .02em; color: var(--ink-2); line-height: 1.5; }
+  .scroll-canvas { max-height: 78vh; overflow-y: auto; overflow-x: hidden;
+    border: 1px solid var(--line); }
+  .wrap-canvas { position: relative; min-height: 260px; padding: .4rem; }
+  #unmapped { margin: .6rem 0 0; font-family: var(--mono); font-size: .72rem;
+    color: var(--ink-2); line-height: 1.5; }
+  #unmapped b { color: var(--ink); font-weight: 700; }
+
+  /* ─── Footer ─── */
+  footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; margin-top: 2rem; }
+  .foot-inner { display: flex; justify-content: space-between; align-items: center;
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--muted); }
+  .foot-inner a:hover { color: var(--accent); }
+  .foot-inner .ast { color: var(--accent); }
+  @media (max-width: 880px) { .foot-inner { flex-direction: column; gap: .85rem; } }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-back">all dashboards</a>
+    <a href="early-warning.html" class="nav-tag">🐀 Rat Radar</a>
+  </div>
+</nav>
+
+<main class="wrap">
+
+  <header class="page">
+    <h1 class="label-stack">
+      <span class="top">DC 311</span>
+      <span class="bot">By Single Member District.</span>
+    </h1>
+    <div class="sub">Which of DC's ~345 ANC Single Member Districts (SMDs — the finest
+      neighborhood subdivision) file the most 311 requests. Filter by service type and
+      year; the ranking re-sorts live.</div>
+    <div class="prov" id="prov"></div>
+    <div class="controls">
+      <span class="l">Year</span>
+      <select id="year"></select>
+      <span class="l">Service type</span>
+      <select id="type"></select>
+      <label class="chk"><input type="checkbox" id="showAll"> Show all 345</label>
+    </div>
+  </header>
+
+  <div class="card">
+    <h2>Requests per SMD — ranked</h2>
+    <p>Sorted high → low. A muted <b>Unmapped/Unknown</b> bar (bottom) counts requests
+      with no coordinates or that fell outside every SMD — counted here, never dropped.</p>
+    <div class="scroll-canvas"><div class="wrap-canvas"><canvas id="smdbar"></canvas></div></div>
+    <p id="unmapped"></p>
+  </div>
+
+</main>
+
+<footer>
+  <div class="wrap foot-inner">
+    <span><span class="ast">✱</span> Kyle Fiducia · DC 311 Data · 2026</span>
+    <a href="https://github.com/kfiducia/dc311-data">github.com/kfiducia/dc311-data →</a>
+  </div>
+</footer>
+
+<script>
+const cssv = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const ACCENT = cssv('--accent') || '#d97e3f';
+const INK2   = cssv('--ink-2')  || '#4a4d52';
+const LINE   = cssv('--line')   || '#d8d4c5';
+const MUTED  = cssv('--muted')  || '#8a8a85';
+Chart.defaults.color = INK2;
+Chart.defaults.borderColor = LINE;
+Chart.defaults.font.family = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
+Chart.defaults.font.size = 11;
+
+const TOP_N = 40;         // rows shown unless "Show all"
+const sum = a => a.reduce((s, x) => s + (x || 0), 0);
+
+fetch('agg/smd.json').then(r => r.json()).then(init);
+
+function init(D) {
+  const yearSel = document.getElementById('year');
+  const typeSel = document.getElementById('type');
+  const showAll = document.getElementById('showAll');
+
+  // provenance line (AC5)
+  const bs = D.boundary_source || {};
+  document.getElementById('prov').innerHTML =
+    `Method: ${D.method}. Boundaries: <b>${bs.layer}</b> (${bs.n} features, field ` +
+    `<code>${bs.id_field}</code>), fetched ${bs.fetched} from ` +
+    `<a href="${bs.url}" target="_blank" rel="noopener">DC GIS MapServer/55</a>. ` +
+    `Generated ${(D.generated || '').slice(0, 16).replace('T', ' ')} UTC.`;
+
+  // year selector: "All years" + each year descending
+  yearSel.innerHTML = '<option value="all">All years</option>' +
+    D.years.slice().reverse().map(y => `<option value="${y}">${y}</option>`).join('');
+  // type selector: "All types" (__all__) + service_types
+  typeSel.innerHTML = '<option value="__all__">All types</option>' +
+    D.service_types.map(t => `<option value="${t}">${t}</option>`).join('');
+
+  let chart = null;
+
+  function perSmd(type) {
+    const n = D.smds.length;
+    if (yearSel.value === 'all') {
+      const acc = new Array(n).fill(0);
+      D.years.forEach(y => {
+        const arr = (D.counts[y] && D.counts[y][type]) || [];
+        for (let i = 0; i < n; i++) acc[i] += arr[i] || 0;
+      });
+      return acc;
+    }
+    const arr = (D.counts[yearSel.value] && D.counts[yearSel.value][type]) || [];
+    return D.smds.map((_, i) => arr[i] || 0);
+  }
+
+  function unmappedFor(type) {
+    let no = 0, out = 0;
+    const add = u => { if (u) { no += u.no_latlon || 0; out += u.outside_smd || 0; } };
+    if (yearSel.value === 'all') {
+      D.years.forEach(y => add(D.unmapped[y] && D.unmapped[y][type]));
+    } else {
+      add(D.unmapped[yearSel.value] && D.unmapped[yearSel.value][type]);
+    }
+    return { no, out };
+  }
+
+  function render() {
+    const type = typeSel.value;
+    const vals = perSmd(type);
+    let rows = D.smds.map((id, i) => [id, vals[i]]).sort((a, b) => b[1] - a[1]);
+    if (!showAll.checked) rows = rows.slice(0, TOP_N);
+
+    const { no, out } = unmappedFor(type);
+    const mapped = sum(vals);
+    const total = mapped + no + out;
+
+    // append the unmapped bar as a distinct trailing bucket
+    const labels = rows.map(r => r[0]).concat(['Unmapped/Unknown']);
+    const data = rows.map(r => r[1]).concat([no + out]);
+    const colors = rows.map(() => ACCENT).concat([MUTED]);
+
+    // scale container height so all rows stay legible & scrollable (AC2)
+    const container = document.querySelector('.wrap-canvas');
+    container.style.height = (labels.length * 18 + 80) + 'px';
+
+    if (chart) chart.destroy();
+    chart = new Chart(document.getElementById('smdbar'), {
+      type: 'bar',
+      data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 0 }] },
+      options: {
+        indexAxis: 'y',
+        maintainAspectRatio: false,
+        responsive: true,
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: c => c.parsed.x.toLocaleString() + ' requests' } } },
+        scales: {
+          x: { beginAtZero: true, grid: { color: LINE },
+               ticks: { callback: v => v.toLocaleString() } },
+          y: { grid: { display: false }, ticks: { autoSkip: false, font: { size: 10 } } }
+        }
+      }
+    });
+
+    const pctNo = total ? (100 * no / total).toFixed(1) : '0.0';
+    document.getElementById('unmapped').innerHTML =
+      `<b>${no.toLocaleString()}</b> requests (${pctNo}%) had no coordinates; ` +
+      `<b>${out.toLocaleString()}</b> fell outside any SMD — counted here, not dropped. ` +
+      `Mapped to an SMD: <b>${mapped.toLocaleString()}</b> of ${total.toLocaleString()}.`;
+  }
+
+  [yearSel, typeSel, showAll].forEach(el => el.addEventListener('change', render));
+  render();
+}
+</script>
+</body>
+</html>
