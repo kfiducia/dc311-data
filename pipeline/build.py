@@ -4,9 +4,11 @@ Reads   data/raw/<signal>_reports.csv   (date, lat, lon, ward, resolved)
 Writes  agg/<signal>_alerts.json         (one per config.SIGNALS entry)
         agg/signals.json                 (manifest the dashboard's picker reads)
 
-Detection unit = H3 res-8 hexes (uniform, ~170 over DC, tiles the city, finer
-than DC's 46 neighborhood clusters), each labeled with the *nearest* single DC
-neighborhood name so a hotspot reads as one place, not a merged cluster.
+Detection unit = ANC Single Member Districts (SMDs) — DC's ~345 real political
+micro-districts. Each report is assigned to its SMD by point-in-polygon (reusing
+smd.py's boundary loader + STRtree), and each SMD is labeled "<code> · <nearest
+neighborhood>" so a hotspot reads as a recognizable place, not a bare code. The
+fine res-9 heat grid is still H3 (a geometry-agnostic density overlay).
 
 Detector = trend-adaptive seasonal aberration detection (syndromic-surveillance
 style), scanned causally so alert dates honestly answer "when could we have
@@ -22,6 +24,7 @@ from pathlib import Path
 import h3
 
 import config as C
+import smd  # reuse SMD boundary loader + point-in-polygon (agg/smd_boundaries.*)
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW = ROOT / "data" / "raw"
@@ -201,7 +204,7 @@ def abatement(counts, resolved, expected):
 
 
 # ----------------------------- per-signal build ----------------------------
-def build_signal(sig, name_pts):
+def build_signal(sig, smd_ctx):
     """Build agg/<key>_alerts.json for one signal. Returns a manifest entry, or
     None if the signal has no fetched reports yet."""
     key, label = sig["key"], sig["label"]
@@ -215,10 +218,13 @@ def build_signal(sig, name_pts):
         print(f"[{key}] empty — skipping")
         return None
 
-    hex_week = defaultdict(lambda: defaultdict(int))   # reports opened / week
-    hex_res = defaultdict(lambda: defaultdict(int))    # tickets closed / week
-    heat_week = defaultdict(lambda: defaultdict(int))  # fine res-9 grid
-    hex_center, hex_label, heat_center = {}, {}, {}
+    smd_ids, geoms, tree = smd_ctx["ids"], smd_ctx["geoms"], smd_ctx["tree"]
+    smd_centers, smd_labels = smd_ctx["centers"], smd_ctx["labels"]
+
+    unit_week = defaultdict(lambda: defaultdict(int))  # reports opened / week / SMD
+    unit_res = defaultdict(lambda: defaultdict(int))   # tickets closed / week / SMD
+    heat_week = defaultdict(lambda: defaultdict(int))  # fine res-9 H3 grid (overlay)
+    heat_center = {}
     min_wk = max_wk = None
 
     for r in rows:
@@ -233,25 +239,26 @@ def build_signal(sig, name_pts):
         min_wk = wk if min_wk is None or wk < min_wk else min_wk
         max_wk = wk if max_wk is None or wk > max_wk else max_wk
 
-        cell = h3.latlng_to_cell(lat, lon, C.H3_RES)
-        if cell not in hex_center:
-            clat, clon = h3.cell_to_latlng(cell)
-            hex_center[cell] = (round(clat, 5), round(clon, 5))
-            hex_label[cell] = nearest_name(clat, clon, name_pts)
-        hex_week[cell][wk] += 1
-
-        rv = r.get("resolved") or ""
-        if rv:
-            try:
-                hex_res[cell][week_monday(date.fromisoformat(rv))] += 1
-            except ValueError:
-                pass
-
+        # fine res-9 heat grid (geometry-agnostic density overlay; kept as H3)
         h9 = h3.latlng_to_cell(lat, lon, C.HEAT_RES)
         if h9 not in heat_center:
             hlat, hlon = h3.cell_to_latlng(h9)
             heat_center[h9] = (round(hlat, 5), round(hlon, 5))
         heat_week[h9][wk] += 1
+
+        # detection/display unit = the SMD that contains the point (point-in-polygon)
+        idx = smd.assign(lat, lon, geoms, tree)
+        if idx is None:                # river / boundary gap / bad geocode -> no SMD
+            continue
+        sid = smd_ids[idx]
+        unit_week[sid][wk] += 1
+
+        rv = r.get("resolved") or ""
+        if rv:
+            try:
+                unit_res[sid][week_monday(date.fromisoformat(rv))] += 1
+            except ValueError:
+                pass
 
     if min_wk is None:
         print(f"[{key}] no in-DC points — skipping")
@@ -263,7 +270,7 @@ def build_signal(sig, name_pts):
         weeks.append(w)
         w += timedelta(days=7)
     widx = {w: i for i, w in enumerate(weeks)}
-    print(f"[{key}] {len(weeks)} weeks, {min_wk} .. {max_wk}; {len(hex_center)} hexes, "
+    print(f"[{key}] {len(weeks)} weeks, {min_wk} .. {max_wk}; {len(unit_week)} SMDs, "
           f"{len(heat_center)} heat cells")
 
     def series_for(week_map):
@@ -274,13 +281,13 @@ def build_signal(sig, name_pts):
         return c
 
     # auxiliary corroborating signals (e.g. dead-animal pickups): weekly counts
-    # per hex + citywide, bucketed into the SAME res-8 grid. Overlaid, not detected.
-    aux_hex, aux_city, aux_meta = {}, {}, []
+    # per SMD + citywide, assigned by the SAME point-in-polygon. Overlaid, not detected.
+    aux_unit, aux_city, aux_meta = {}, {}, []
     for a in sig.get("aux", []):
         path = RAW / f"{a['key']}_reports.csv"
         if not path.exists():
             continue
-        by_cell = defaultdict(lambda: defaultdict(int))
+        by_unit = defaultdict(lambda: defaultdict(int))
         for r in csv.DictReader(path.open()):
             try:
                 lat, lon = float(r["lat"]), float(r["lon"])
@@ -289,37 +296,39 @@ def build_signal(sig, name_pts):
                 continue
             if not (38.7 < lat < 39.05 and -77.15 < lon < -76.85):
                 continue
-            by_cell[h3.latlng_to_cell(lat, lon, C.H3_RES)][week_monday(d)] += 1
-        aux_hex[a["key"]] = {cell: series_for(wm) for cell, wm in by_cell.items()}
+            idx = smd.assign(lat, lon, geoms, tree)
+            if idx is None:
+                continue
+            by_unit[smd_ids[idx]][week_monday(d)] += 1
+        aux_unit[a["key"]] = {sid: series_for(wm) for sid, wm in by_unit.items()}
         city = [0] * len(weeks)
-        for s in aux_hex[a["key"]].values():
+        for s in aux_unit[a["key"]].values():
             for i in range(len(weeks)):
                 city[i] += s[i]
         aux_city[a["key"]] = city
         aux_meta.append({"key": a["key"], "label": a["label"], "total": sum(city)})
         print(f"  aux '{a['key']}': {sum(city):,} reports")
 
-    # per-hex units (the detection + map unit)
+    # per-SMD units (the detection + map unit). Geometry is NOT embedded — the
+    # front-end joins these to agg/smd_boundaries.min.geojson by SMD id.
     units = []
-    for cell in hex_center:
-        counts = series_for(hex_week[cell])
-        if sum(counts) < 40:  # skip near-empty hexes
+    for sid in unit_week:
+        counts = series_for(unit_week[sid])
+        if sum(counts) < 40:  # skip near-empty SMDs
             continue
-        resolved = series_for(hex_res[cell])
+        resolved = series_for(unit_res[sid])
         expected, zs, alert = detect(weeks, counts)
         eps = episodes(weeks, counts, expected, alert)
         units.append({
-            "id": cell, "label": hex_label.get(cell) or "—",
-            "center": list(hex_center[cell]),
-            "boundary": [[round(la, 5), round(lo, 5)]
-                         for la, lo in h3.cell_to_boundary(cell)],
+            "id": sid, "label": smd_labels.get(sid) or sid,
+            "center": list(smd_centers.get(sid, (None, None))),
             "total": sum(counts), "counts": counts,
             "expected": expected, "z": zs,
             "resolved": resolved,
             "alert_weeks": [i for i, a in enumerate(alert) if a],
             "episodes": eps,
             "abatement": abatement(counts, resolved, expected),
-            "aux": {k: aux_hex[k].get(cell, [0] * len(weeks)) for k in aux_hex},
+            "aux": {k: aux_unit[k].get(sid, [0] * len(weeks)) for k in aux_unit},
         })
 
     # citywide roll-up (for the abatement headline + context)
@@ -356,7 +365,10 @@ def build_signal(sig, name_pts):
 
     out = {
         "signal": key, "signal_label": label,
-        "detect_res": C.H3_RES, "heat_res": C.HEAT_RES,
+        "detect_unit": "smd", "heat_res": C.HEAT_RES,
+        "boundary_file": "agg/smd_boundaries.min.geojson",
+        "boundary_source": smd_ctx.get("source"),
+        "n_smd": len(units),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "data_through": weeks[-1].isoformat() if weeks else None,
         "generated_from": {"start_year": C.START_YEAR, "where": C.signal_where(sig)},
@@ -374,7 +386,7 @@ def build_signal(sig, name_pts):
     dest.write_text(json.dumps(out, separators=(",", ":")))
     total_eps = sum(len(u["episodes"]) for u in units)
     print(f"[{key}] wrote {dest.name}  ({dest.stat().st_size/1024:.0f} KB) — "
-          f"{len(units)} hex units, {len(heat)} heat cells, {total_eps} episodes")
+          f"{len(units)} SMD units, {len(heat)} heat cells, {total_eps} episodes")
     return {
         "key": key, "label": label, "file": f"agg/{key}_alerts.json",
         "data_through": out["data_through"], "total": sum(city_counts),
@@ -382,12 +394,30 @@ def build_signal(sig, name_pts):
     }
 
 
+# ----------------------------- SMD context ---------------------------------
+def load_smd_context(name_pts):
+    """SMD polygons (via smd.py) + a display label per SMD: "<code> · <nearest
+    neighborhood>", so a hotspot reads as a recognizable place, not a bare code."""
+    smd_ids, geoms, tree, _smd_names, source_meta = smd.load_smd_polygons()
+    centers, labels = {}, {}
+    for i, sid in enumerate(smd_ids):
+        rp = geoms[i].representative_point()   # guaranteed inside the polygon
+        clat, clon = round(rp.y, 5), round(rp.x, 5)
+        centers[sid] = (clat, clon)
+        nbhd = nearest_name(clat, clon, name_pts)
+        labels[sid] = f"{sid} · {nbhd}" if nbhd and nbhd != "?" else sid
+    print(f"SMD context: {len(smd_ids)} districts labeled by nearest neighborhood")
+    return {"ids": smd_ids, "geoms": geoms, "tree": tree,
+            "centers": centers, "labels": labels, "source": source_meta}
+
+
 # ----------------------------- main ----------------------------------------
 def main():
     name_pts = load_name_points()
+    smd_ctx = load_smd_context(name_pts)
     manifest = []
     for sig in C.resolve_signals():
-        entry = build_signal(sig, name_pts)
+        entry = build_signal(sig, smd_ctx)
         if entry:
             manifest.append(entry)
     (AGG / "signals.json").write_text(json.dumps(
