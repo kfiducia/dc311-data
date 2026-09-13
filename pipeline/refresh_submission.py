@@ -130,6 +130,8 @@ def main():
     agg["hour_local_by_year"][ys] = hours
     agg["bulk_total"] = sum(c for _, c in agg["by_year"])
     agg["generated"] = datetime.now(timezone.utc).isoformat()
+    # Freshness stamp: latest month present in the (now-refreshed) volume series.
+    agg["data_through"] = agg["by_month"][-1][0] if agg["by_month"] else None
 
     # write agg.json
     (ROOT / "agg.json").write_text(json.dumps(agg, separators=(",", ":")))
