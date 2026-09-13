@@ -20,6 +20,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&family=VT323&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="chart.umd.min.js"></script>
 <style>
   :root {
@@ -115,6 +117,15 @@
     font-size: .72rem; font-weight: 600; letter-spacing: .06em; cursor: pointer; }
   select:focus { outline: 1.5px solid var(--accent); outline-offset: 1px; }
 
+  /* ─── Map card ─── */
+  #smdmap { height: 60vh; min-height: 380px; border: 1px solid var(--line); }
+  .leaflet-container { background: var(--cream-2); font-family: var(--mono); }
+  .leaflet-tooltip { font-family: var(--mono); font-size: .72rem; }
+  .legend { display: flex; align-items: center; gap: .4rem; margin: .7rem 0 0;
+    font-family: var(--mono); font-size: .68rem; color: var(--ink-2); flex-wrap: wrap; }
+  .legend .bar { display: inline-flex; border: 1px solid var(--line); }
+  .legend .bar i { width: 26px; height: 12px; display: inline-block; }
+
   /* ─── Chart card ─── */
   .card { margin: 1.5rem 0 1rem; border: 1px solid var(--line);
     padding: 1.25rem 1.35rem 1.5rem; }
@@ -172,6 +183,15 @@
   </header>
 
   <div class="card">
+    <h2>Requests by SMD — map</h2>
+    <p>Each of DC's 345 Single Member Districts shaded by request volume for the
+      selected year and service type. Darker = more requests. Hover a district for
+      its count. Shares the filters above.</p>
+    <div id="smdmap"></div>
+    <div class="legend" id="legend"></div>
+  </div>
+
+  <div class="card">
     <h2>Requests per SMD — ranked</h2>
     <p>Sorted high → low. A muted <b>Unmapped/Unknown</b> bar (bottom) counts requests
       with no coordinates or that fell outside every SMD — counted here, never dropped.</p>
@@ -202,9 +222,12 @@ Chart.defaults.font.size = 11;
 const TOP_N = 40;         // rows shown unless "Show all"
 const sum = a => a.reduce((s, x) => s + (x || 0), 0);
 
-fetch('agg/smd.json').then(r => r.json()).then(init);
+Promise.all([
+  fetch('agg/smd.json').then(r => r.json()),
+  fetch('agg/smd_boundaries.min.geojson').then(r => r.json()),
+]).then(([D, geo]) => init(D, geo));
 
-function init(D) {
+function init(D, geo) {
   const yearSel = document.getElementById('year');
   const typeSel = document.getElementById('type');
   const showAll = document.getElementById('showAll');
@@ -295,8 +318,48 @@ function init(D) {
       `Mapped to an SMD: <b>${mapped.toLocaleString()}</b> of ${total.toLocaleString()}.`;
   }
 
-  [yearSel, typeSel, showAll].forEach(el => el.addEventListener('change', render));
-  render();
+  // ---- choropleth map (shares the year + service-type filters) ----
+  const RAMP = ['#f4cf92', '#eaa85f', '#d97e3f', '#b4531e', '#7a2e12'];
+  const map = L.map('smdmap', { scrollWheelZoom: false }).setView([38.905, -76.99], 11);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Tiles &copy; Esri', maxZoom: 16 }).addTo(map);
+  const byId = {};
+  const gl = L.geoJSON(geo, {
+    style: () => ({ weight: 1, color: '#ffffff', fillOpacity: .85, fillColor: '#e9e5d8' }),
+    onEachFeature: (f, layer) => {
+      byId[f.properties.id] = layer;
+      layer.on('mouseover', () => layer.setStyle({ weight: 2.5, color: ACCENT }));
+      layer.on('mouseout', () => layer.setStyle({ weight: 1, color: '#ffffff' }));
+    },
+  }).addTo(map);
+  try { map.fitBounds(gl.getBounds(), { padding: [8, 8] }); } catch (e) {}
+  setTimeout(() => map.invalidateSize(), 0);
+
+  const mapColor = (v, max) =>
+    !v ? '#e9e5d8' : RAMP[Math.min(RAMP.length - 1, Math.floor(Math.sqrt(v / max) * RAMP.length))];
+
+  function renderMap() {
+    const type = typeSel.value;
+    const vals = perSmd(type);
+    const valById = {};
+    D.smds.forEach((id, i) => { valById[id] = vals[i]; });
+    const max = Math.max(1, ...vals);
+    Object.entries(byId).forEach(([id, layer]) => {
+      const v = valById[id] || 0;
+      layer.setStyle({ fillColor: mapColor(v, max), fillOpacity: .85, weight: 1, color: '#ffffff' });
+      layer.bindTooltip(`<b>${id}</b> · ${v.toLocaleString()} requests`, { sticky: true });
+    });
+    const yr = yearSel.value === 'all' ? 'all years' : yearSel.value;
+    const ty = type === '__all__' ? 'all types' : type;
+    document.getElementById('legend').innerHTML =
+      `fewer <span class="bar">${RAMP.map(c => `<i style="background:${c}"></i>`).join('')}</span> more` +
+      ` · max ${max.toLocaleString()} in one SMD · ${yr}, ${ty}`;
+  }
+
+  function renderAll() { render(); renderMap(); }
+  [yearSel, typeSel].forEach(el => el.addEventListener('change', renderAll));
+  showAll.addEventListener('change', render);   // "show all 345" only affects the bar list
+  renderAll();
 }
 </script>
 </body>
