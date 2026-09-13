@@ -15,7 +15,7 @@ is driving reports back down.
 import csv
 import json
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import h3
@@ -343,6 +343,8 @@ def main():
     out = {
         "signal": C.SIGNAL_KEY, "signal_label": C.SIGNAL_LABEL,
         "detect_res": C.H3_RES, "heat_res": C.HEAT_RES,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "data_through": weeks[-1].isoformat() if weeks else None,
         "generated_from": {"start_year": C.START_YEAR, "service_code": C.SERVICE_CODE},
         "week_start": [w.isoformat() for w in weeks],
         "detector": {"alert_z": C.ALERT_Z, "persist_z": C.PERSIST_Z,

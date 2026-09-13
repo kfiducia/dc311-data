@@ -1,0 +1,95 @@
+name: Refresh dashboard data
+
+# Keeps the DC 311 dashboards current without manual runs.
+#
+# Refreshes the two dashboards whose data comes straight from DC's public
+# ArcGIS API (no credentials needed):
+#   * agg.json / dashboard.html / index.html   — submission-volume dashboard
+#   * agg/rodent_alerts.json / early-warning.html — rat-radar / early-warning
+#
+# NOT refreshed here: the submission-METHOD / source numbers. Those are derived
+# from externally-enriched CSVs that live in a separate local workspace
+# (pipeline/refresh_methods.py, SRC_DIR), which CI doesn't have — running it
+# with no source CSVs would wipe good method data with empties. Method data
+# stays a manual refresh; see README "Refresh".
+#
+# Cadence: monthly (DC's data lags and backfills, so daily is redundant).
+
+on:
+  schedule:
+    - cron: "0 8 1 * *" # 08:00 UTC on the 1st of every month
+  workflow_dispatch: {} # allow manual "Run workflow" from the Actions tab
+
+# Let the job push the regenerated artifacts back to the branch.
+permissions:
+  contents: write
+
+# Never let two refreshes race on the same branch.
+concurrency:
+  group: refresh-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Reuse per-year checkpoint CSVs across runs so we only pull the current
+      # (partial) year, not 2018->today, every time. `data/raw/` is gitignored,
+      # so the cache is the only thing that carries these between runs.
+      # A run_id-suffixed key always misses -> the cache is re-saved every run
+      # with the newly-fetched year folded in; restore-keys pulls the latest
+      # previous cache to seed it.
+      - name: Restore raw-data checkpoints
+        uses: actions/cache@v4
+        with:
+          path: data/raw
+          key: dc311-raw-${{ github.run_id }}
+          restore-keys: |
+            dc311-raw-
+
+      - name: Install dependencies
+        run: pip install -r pipeline/requirements.txt
+
+      # Force the current, still-growing year to be re-pulled (fetch.py treats an
+      # existing per-year checkpoint as final and skips it).
+      - name: Invalidate current-year checkpoints
+        run: rm -f data/raw/_*_$(date -u +%Y).csv
+
+      # Rat-radar / early-warning: pull rodent + dead-animal reports, rebuild.
+      - name: Fetch rat-radar source data
+        run: python pipeline/fetch.py
+      - name: Build rat-radar aggregates
+        run: python pipeline/build.py
+
+      # Submission-volume: refresh the current year straight from the live API.
+      - name: Refresh submission volume
+        run: python pipeline/refresh_submission.py
+
+      # Fail loudly if the pull came back truncated/empty or the window regressed,
+      # BEFORE anything is committed.
+      - name: Guardrail (freshness / sanity)
+        run: python pipeline/guardrail.py
+
+      # Commit only the dashboard-facing artifacts, and only if something changed.
+      - name: Commit & push if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add agg.json agg/rodent_alerts.json \
+                  export_by_month.csv export_by_year.csv \
+                  dashboard.html index.html
+          if git diff --cached --quiet; then
+            echo "No data changes — nothing to commit."
+          else
+            git commit -m "Auto-refresh dashboard data ($(date -u +%Y-%m-%d))"
+            git push
+          fi
