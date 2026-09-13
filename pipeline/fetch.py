@@ -21,6 +21,13 @@ import config as C
 RAW = Path(__file__).resolve().parent.parent / "data" / "raw"
 RAW.mkdir(parents=True, exist_ok=True)
 
+# DCD8: per-year source record counts are our change token. This MapServer
+# exposes no lastEditDate/editingInfo and its ETags aren't stable, but a
+# returnCountOnly query per year is cheap and reliable. We store the last-seen
+# count per year and only re-fetch a year whose count changed (a backfill) — plus
+# always the current year, whose closures fill in without changing the count.
+COUNTS = RAW / "radar_year_counts.json"
+
 
 def _get(url, params):
     q = urllib.parse.urlencode(params)
@@ -46,6 +53,42 @@ def year_layers():
             if tail.isdigit():
                 out[int(tail)] = lyr["id"]
     return out
+
+
+def year_counts(layers, years):
+    """{year: total record count} via returnCountOnly — the per-year change token."""
+    out = {}
+    for y in years:
+        d = _get(f"{C.ARCGIS_SERVICE}/{layers[y]}/query",
+                 {"where": "1=1", "returnCountOnly": "true", "f": "json"})
+        out[y] = d.get("count")
+    return out
+
+
+def load_counts():
+    if COUNTS.exists():
+        try:
+            return json.loads(COUNTS.read_text())
+        except json.JSONDecodeError:
+            pass
+    return {}
+
+
+def changed_years(layers, years):
+    """Years to (re)fetch: the current year always, plus any prior year whose
+    source count *changed* since we last stored it (a backfill). A prior year we
+    have no stored count for is TRUSTED (we reuse its committed checkpoint and
+    just record the count) — so a fresh clone never re-pulls all of history.
+    Returns (set_of_years, live_counts) so main can persist the fresh counts."""
+    live = year_counts(layers, years)
+    stored = load_counts()
+    current = max(years)
+    changed = {current}
+    for y in years:
+        sy = str(y)
+        if sy in stored and stored[sy] != live[y]:
+            changed.add(y)   # known count, and it moved -> backfill, re-fetch
+    return changed, live
 
 
 def fetch_year(layer_id, year, where):
@@ -84,14 +127,16 @@ def fetch_year(layer_id, year, where):
     return rows
 
 
-def fetch_signal(key, where, layers, years):
+def fetch_signal(key, where, layers, years, refetch):
     """Fetch one signal's WHERE across all years -> data/raw/<key>_reports.csv.
-    Checkpoints each year so a stall never loses prior work; reruns skip cached."""
+    Checkpoints each year (committed to git, DCD8). A year is (re)fetched only if
+    its checkpoint is missing or the year is in `refetch` (current year or a
+    backfilled prior year); otherwise the committed checkpoint is reused as-is."""
     print(f"Fetching {key}  [{where}]  for years {years[0]}-{years[-1]}")
     for y in years:
         part = RAW / f"_{key}_{y}.csv"
-        if part.exists():
-            print(f"  {y}: cached", file=sys.stderr)
+        if part.exists() and y not in refetch:
+            print(f"  {y}: reuse committed checkpoint (unchanged)", file=sys.stderr)
             continue
         rows = fetch_year(layers[y], y, where)
         with part.open("w", newline="") as fh:
@@ -122,8 +167,13 @@ def iter_signals():
 def main():
     layers = year_layers()
     years = sorted(y for y in layers if y >= C.START_YEAR)
+    refetch, live = changed_years(layers, years)
+    reused = [y for y in years if y not in refetch]
+    print(f"Radar fetch: (re)fetch={sorted(refetch)} · reuse committed={reused or '—'}")
     for key, where in iter_signals():
-        fetch_signal(key, where, layers, years)
+        fetch_signal(key, where, layers, years, refetch)
+    # Persist the fresh per-year counts so the next run can detect changes.
+    COUNTS.write_text(json.dumps({str(y): live[y] for y in years}, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":
