@@ -11,9 +11,11 @@ plus an explicit "unmapped" bucket (no lat/lon · outside any SMD) so no request
 is silently dropped.
 
 Mirrors the idioms in refresh_submission.py (_get 6× retry, year_layers) and the
-per-year CSV-checkpoint pattern in fetch.py. Current (max) year is always re-pulled;
-prior years use their cached CSV (delete data/raw/_smd_pts_<year>.csv to force a
-re-pull). Safe to re-run.
+per-year CSV-checkpoint pattern in fetch.py. Rebuilds are cheap: prior years are
+immutable and reused from their cached CSV forever; the current year is re-pulled
+only when a fetch manifest shows its cache is older than CURRENT_YEAR_MAX_AGE_DAYS
+(DC backfills monthly at most). Delete data/raw/_smd_pts_<year>.csv (or the
+manifest entry) to force a re-pull. Safe to re-run.
 
 Run:  cd pipeline && ./.venv/bin/python smd.py
 """
@@ -41,6 +43,16 @@ SMD_LAYER = ("https://maps2.dcgis.dc.gov/dcgis/rest/services/DCGIS_DATA/"
              "Administrative_Other_Boundaries_WebMercator/MapServer/55")
 SMD_START_YEAR = 2016   # SMDs are 2023 boundaries; modern years are clean & bounded
 TOP_TYPES = 20          # top service categories kept; rest -> "Other"
+
+# Freshness policy for the per-year point checkpoints (data/raw/_smd_pts_<year>.csv):
+# prior years are immutable (DC's historical 311 doesn't change) so their cache is
+# reused forever; the current year is re-pulled only when its cached copy is older
+# than this many days, since DC backfills monthly at most — a full re-pull on every
+# rebuild is wasteful. A fetch manifest records when each year was last pulled, so
+# this survives cache restores (file mtime is reset by CI cache/checkout and can't
+# be trusted).
+CURRENT_YEAR_MAX_AGE_DAYS = 20
+MANIFEST = RAW / "smd_fetch_manifest.json"
 
 # csv default field-size limit is too small for the occasional long attribute
 csv.field_size_limit(10 * 1024 * 1024)
@@ -70,6 +82,20 @@ def year_layers():
             if tail.isdigit():
                 out[int(tail)] = lyr["id"]
     return out
+
+
+def load_manifest():
+    """{year_str: fetched_iso_date} — when each year's checkpoint was last pulled."""
+    if MANIFEST.exists():
+        try:
+            return json.loads(MANIFEST.read_text())
+        except json.JSONDecodeError:
+            pass
+    return {}
+
+
+def save_manifest(m):
+    MANIFEST.write_text(json.dumps(m, indent=2, sort_keys=True))
 
 
 def load_smd_polygons():
@@ -122,17 +148,13 @@ def assign(pt_lat, pt_lon, geoms, tree):
     return None
 
 
-def fetch_year_points(layer_id, year, is_current):
+def fetch_year_points(layer_id, year):
     """Paginate one year's requests -> data/raw/_smd_pts_<year>.csv (lat,lon,type).
 
-    Rows missing lat/lon are KEPT (empty coords) so they can be counted as
-    no_latlon, never silently dropped. Current year is always re-pulled."""
+    Always (re-)fetches when called; callers gate WHICH years need pulling (see
+    needs_fetch in main). Rows missing lat/lon are KEPT (empty coords) so they can
+    be counted as no_latlon, never silently dropped."""
     part = RAW / f"_smd_pts_{year}.csv"
-    if part.exists() and not is_current:
-        print(f"  {year}: cached", file=sys.stderr)
-        return part
-    if part.exists():
-        part.unlink()  # force re-pull of the current year
     rows, offset = [], 0
     while True:
         data = _get(
@@ -173,17 +195,42 @@ def main():
     layers = year_layers()
     years = sorted(y for y in layers if y >= SMD_START_YEAR)
     current = max(layers)
-    print(f"Aggregating SMD counts for years {years[0]}-{years[-1]} "
-          f"(re-pulling current year {current})")
+
+    # Decide which years actually need a (re-)pull, so rebuilds don't re-fetch
+    # immutable history. Prior years: reuse the cached CSV if present. Current year:
+    # reuse unless its manifest age exceeds CURRENT_YEAR_MAX_AGE_DAYS.
+    manifest = load_manifest()
+    today = date.today()
+
+    def needs_fetch(y):
+        part = RAW / f"_smd_pts_{y}.csv"
+        if not part.exists():
+            return True                       # no cache -> must fetch
+        if y != current:
+            return False                      # prior year -> immutable, reuse
+        fetched = manifest.get(str(y))        # current year -> age-gate
+        if not fetched:
+            return True
+        return (today - date.fromisoformat(fetched)).days >= CURRENT_YEAR_MAX_AGE_DAYS
+
+    to_fetch = [y for y in years if needs_fetch(y)]
+    reused = [y for y in years if y not in to_fetch]
+    print(f"SMD build: years {years[0]}-{years[-1]} · "
+          f"fetch={to_fetch or '—'} · reuse cached={reused or '—'}", file=sys.stderr)
 
     smd_ids, geoms, tree, labels, source_meta = load_smd_polygons()
     n_smd = len(smd_ids)
 
-    # fetch (checkpointed) all years — parallel across years (network-bound;
-    # each writes its own CSV, so the threads never touch shared state)
-    with ThreadPoolExecutor(max_workers=6) as ex:
-        parts = dict(zip(years, ex.map(
-            lambda y: fetch_year_points(layers[y], y, y == current), years)))
+    # fetch only the years that need it — parallel (network-bound; each writes its
+    # own CSV, so threads never touch shared state). Manifest updated once, after.
+    if to_fetch:
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            list(ex.map(lambda y: fetch_year_points(layers[y], y), to_fetch))
+        for y in to_fetch:
+            manifest[str(y)] = today.isoformat()
+        save_manifest(manifest)
+
+    parts = {y: RAW / f"_smd_pts_{y}.csv" for y in years}
 
     # first pass: global service-type totals -> top-20 kept, rest -> "Other"
     type_totals = Counter()
