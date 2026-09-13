@@ -22,7 +22,12 @@ name: Refresh dashboard data
 on:
   schedule:
     - cron: "0 8 1 * *" # 08:00 UTC on the 1st of every month
-  workflow_dispatch: {} # allow manual "Run workflow" from the Actions tab
+  workflow_dispatch: # allow manual "Run workflow" from the Actions tab
+    inputs:
+      skip_build:
+        description: "Deploy the committed site as-is (skip the data fetch/build). Publishes in ~40s — use to ship a code/UI change without re-pulling data."
+        type: boolean
+        default: false
 
 # Pages-artifact deploy needs these; no `contents: write` — nothing is pushed back.
 permissions:
@@ -46,7 +51,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Everything from here down to Guardrail rebuilds data and is skipped when
+      # skip_build=true (fast deploy-only: just stage the committed site + deploy).
       - name: Set up Python
+        if: ${{ !inputs.skip_build }}
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -58,6 +66,7 @@ jobs:
       # the fetched raw data. run_id-suffixed key always misses -> re-saved each
       # run with the newest year folded in; restore-keys seeds from the latest.
       - name: Restore raw-data checkpoints
+        if: ${{ !inputs.skip_build }}
         uses: actions/cache@v4
         with:
           path: data/raw
@@ -66,40 +75,49 @@ jobs:
             dc311-raw-
 
       - name: Install dependencies
+        if: ${{ !inputs.skip_build }}
         run: pip install -r pipeline/requirements.txt
 
       # Force the current, still-growing year to be re-pulled (fetch.py + smd.py
       # treat an existing per-year checkpoint as final; this matches "_<signal>_"
       # and "_smd_pts_" checkpoints alike).
       - name: Invalidate current-year checkpoints
+        if: ${{ !inputs.skip_build }}
         run: rm -f data/raw/_*_$(date -u +%Y).csv
 
       # Complaint Radar / early-warning: pull every configured signal and rebuild
       # all per-signal alerts + the signals.json manifest the picker reads.
       - name: Fetch radar source data
+        if: ${{ !inputs.skip_build }}
         run: python pipeline/fetch.py
       - name: Build radar aggregates
+        if: ${{ !inputs.skip_build }}
         run: python pipeline/build.py
 
       # Submission-volume: refresh the current year straight from the live API
       # (rewrites agg.json + the embedded DATA in dashboard.html/index.html).
       - name: Refresh submission volume
+        if: ${{ !inputs.skip_build }}
         run: python pipeline/refresh_submission.py
 
       # Complaint categories + per-ward anomaly board.
       - name: Build complaint-category breakdown
+        if: ${{ !inputs.skip_build }}
         run: python pipeline/categories.py
       - name: Build per-ward anomaly board
+        if: ${{ !inputs.skip_build }}
         run: python pipeline/anomaly.py
 
       # SMD chart + choropleth data (point-in-polygon; reuses cached history via
       # its fetch manifest, only re-pulls the current year).
       - name: Build SMD aggregates
+        if: ${{ !inputs.skip_build }}
         run: python pipeline/smd.py
 
       # Sanity-gate the freshly built artifacts. On failure the job stops here, no
       # deploy runs, and the last good Pages deploy stays live.
       - name: Guardrail (build sanity)
+        if: ${{ !inputs.skip_build }}
         run: python pipeline/guardrail.py
 
       # Stage the public site: everything except source/tooling. agg/ (freshly
