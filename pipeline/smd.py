@@ -6,17 +6,14 @@ boundaries (shapely STRtree R-tree prefilter → exact `.contains` test). This i
 build-time only: nothing but precomputed counts ships to the browser.
 
 Writes agg/smd.json — index-aligned integer arrays of requests per SMD, sliced
-by year and by service-type category (SERVICETYPECODEDESCRIPTION, top-20 + Other),
-plus an explicit "unmapped" bucket (no lat/lon · outside any SMD) so no request
-is silently dropped.
+by year and by GRANULAR service (SERVICECODEDESCRIPTION, top-20 + Other — the
+actual service like "Bulk Collection", not the coarse handling agency), plus an
+explicit "unmapped" bucket (no lat/lon · outside any SMD) so no request is
+silently dropped.
 
-Mirrors the idioms in refresh_submission.py (_get 6× retry, year_layers) and the
-per-year CSV-checkpoint pattern in fetch.py. Rebuilds are cheap: the per-year
-checkpoints live in git (DCD8); prior years are reused as-is unless their source
-record count changed (a backfill), and the current year is always re-pulled. The
-manifest stores the last-seen per-year count as the change token. Delete
-data/raw/_smd_pts_<year>.csv (or its manifest entry) to force a re-pull. Safe to
-re-run.
+DCD10: reads the unified data/raw/_all_<year>.csv (produced + git-committed by
+fetch.py) — it no longer fetches request rows itself, only the SMD boundary
+polygons (cached). Rebuilds are cheap and offline; safe to re-run.
 
 Run:  cd pipeline && ./.venv/bin/python smd.py
 """
@@ -27,7 +24,6 @@ import time
 import urllib.parse
 import urllib.request
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -45,11 +41,10 @@ SMD_LAYER = ("https://maps2.dcgis.dc.gov/dcgis/rest/services/DCGIS_DATA/"
 SMD_START_YEAR = 2016   # SMDs are 2023 boundaries; modern years are clean & bounded
 TOP_TYPES = 20          # top service categories kept; rest -> "Other"
 
-# Freshness policy (DCD8): per-year point checkpoints (data/raw/_smd_pts_<year>.csv)
-# live in git. Prior years are immutable and reused as-is unless their source
-# record count changes (a backfill); the current year is always re-pulled. The
-# manifest stores the last-seen per-year count (the change token) + fetch date.
-MANIFEST = RAW / "smd_fetch_manifest.json"
+# DCD10: smd.py no longer fetches request rows — it reads the unified
+# data/raw/_all_<year>.csv (produced by fetch.py) and groups by the GRANULAR
+# service (SERVICECODEDESCRIPTION), not the coarse handling agency. Only the SMD
+# boundary polygons are still fetched here (cached).
 
 # The raw 2023 SMD boundaries are ~4 MB — far too heavy to ship to the browser for
 # the choropleth (DCD3). Simplify each polygon and drop coordinate precision to get
@@ -74,44 +69,6 @@ def _get(url, params):
                 raise
             print(f"  retry {attempt+1} ({e})", file=sys.stderr)
             time.sleep(3 * (attempt + 1))
-
-
-def year_layers():
-    """Map each year -> layer id by parsing the MapServer's layer list."""
-    meta = _get(C.ARCGIS_SERVICE, {"f": "json"})
-    out = {}
-    for lyr in meta["layers"]:
-        name = lyr["name"]  # e.g. "All Service Requests - 2025"
-        if name.startswith("All Service Requests - "):
-            tail = name.rsplit("-", 1)[-1].strip()
-            if tail.isdigit():
-                out[int(tail)] = lyr["id"]
-    return out
-
-
-def load_manifest():
-    """{year_str: {"fetched": iso, "count": N}} — per-year fetch date + the source
-    record count we last saw (the change token; see DCD8 in fetch.py)."""
-    if MANIFEST.exists():
-        try:
-            return json.loads(MANIFEST.read_text())
-        except json.JSONDecodeError:
-            pass
-    return {}
-
-
-def save_manifest(m):
-    MANIFEST.write_text(json.dumps(m, indent=2, sort_keys=True))
-
-
-def year_counts(layers, years):
-    """{year: total record count} via returnCountOnly — the per-year change token."""
-    out = {}
-    for y in years:
-        d = _get(f"{C.ARCGIS_SERVICE}/{layers[y]}/query",
-                 {"where": "1=1", "returnCountOnly": "true", "f": "json"})
-        out[y] = d.get("count")
-    return out
 
 
 def _round_coords(obj, nd):
@@ -198,109 +155,44 @@ def assign(pt_lat, pt_lon, geoms, tree):
     return None
 
 
-def fetch_year_points(layer_id, year):
-    """Paginate one year's requests -> data/raw/_smd_pts_<year>.csv (lat,lon,type).
-
-    Always (re-)fetches when called; callers gate WHICH years need pulling (see
-    needs_fetch in main). Rows missing lat/lon are KEPT (empty coords) so they can
-    be counted as no_latlon, never silently dropped."""
-    part = RAW / f"_smd_pts_{year}.csv"
-    rows, offset = [], 0
-    while True:
-        data = _get(
-            f"{C.ARCGIS_SERVICE}/{layer_id}/query",
-            {"where": "1=1",
-             "outFields": "ADDDATE,LATITUDE,LONGITUDE,SERVICETYPECODEDESCRIPTION",
-             "returnGeometry": "false",
-             "resultOffset": offset, "resultRecordCount": 1000,
-             "orderByFields": "ADDDATE", "f": "json"},
-        )
-        feats = data.get("features", [])
-        if not feats:
-            break
-        for f in feats:
-            a = f["attributes"]
-            lat, lon = a.get("LATITUDE"), a.get("LONGITUDE")
-            t = (a.get("SERVICETYPECODEDESCRIPTION") or "").strip()
-            rows.append((f"{lat:.6f}" if lat is not None else "",
-                         f"{lon:.6f}" if lon is not None else "", t))
-        offset += len(feats)
-        if offset % 20000 == 0:
-            print(f"  {year}: {offset} rows", file=sys.stderr)
-        if len(feats) < 1000:
-            break
-    with part.open("w", newline="") as fh:
-        csv.writer(fh).writerows(rows)
-    print(f"  {year}: wrote {len(rows):,}", file=sys.stderr)
-    return part
-
-
 def canon(t):
-    """Canonical service-type label; empty -> 'Unknown type' (folded into Other)."""
+    """Canonical service label; empty -> 'Unknown type' (folded into Other)."""
     t = (t or "").strip()
     return t if t else "Unknown type"
 
 
+def all_year_files():
+    """{year: path} for data/raw/_all_<year>.csv with year >= SMD_START_YEAR."""
+    out = {}
+    for f in RAW.glob("_all_*.csv"):
+        try:
+            y = int(f.stem.rsplit("_", 1)[-1])
+        except ValueError:
+            continue
+        if y >= SMD_START_YEAR:
+            out[y] = f
+    return out
+
+
 def main():
-    layers = year_layers()
-    years = sorted(y for y in layers if y >= SMD_START_YEAR)
-    current = max(layers)
-
-    # Decide which years actually need a (re-)pull, so rebuilds don't re-fetch
-    # immutable history (DCD8). The committed per-year checkpoints are the store;
-    # a year is re-fetched only if its checkpoint is missing, it's the current
-    # year (points/closures land continuously), or its source count changed since
-    # we last stored it (a backfill to an old year).
-    manifest = load_manifest()
-    today = date.today()
-    live_counts = year_counts(layers, years)
-
-    def needs_fetch(y):
-        part = RAW / f"_smd_pts_{y}.csv"
-        if not part.exists():
-            return True                       # no checkpoint -> must fetch
-        if y == current:
-            return True                       # current year -> always refresh
-        prev = manifest.get(str(y))
-        prev = prev if isinstance(prev, dict) else {}
-        pc = prev.get("count")
-        # prior year: re-fetch ONLY if we have a stored count and it moved
-        # (a backfill). Unknown count -> trust the committed checkpoint.
-        return pc is not None and pc != live_counts.get(y)
-
-    to_fetch = [y for y in years if needs_fetch(y)]
-    reused = [y for y in years if y not in to_fetch]
-    print(f"SMD build: years {years[0]}-{years[-1]} · "
-          f"fetch={to_fetch or '—'} · reuse committed={reused or '—'}", file=sys.stderr)
+    files = all_year_files()   # data/raw/_all_<year>.csv (committed; produced by fetch.py)
+    if not files:
+        raise SystemExit("No data/raw/_all_*.csv — run fetch.py first.")
+    years = sorted(files)
 
     smd_ids, geoms, tree, labels, source_meta = load_smd_polygons()
     n_smd = len(smd_ids)
     write_min_boundaries()  # compact polygons for the client choropleth (DCD3)
+    print(f"SMD build (from _all): years {years[0]}-{years[-1]} · {n_smd} SMDs",
+          file=sys.stderr)
 
-    # fetch only the years that need it — parallel (network-bound; each writes its
-    # own CSV, so threads never touch shared state). Manifest updated once, after.
-    if to_fetch:
-        with ThreadPoolExecutor(max_workers=6) as ex:
-            list(ex.map(lambda y: fetch_year_points(layers[y], y), to_fetch))
-    # Record the source count for every year (the change token) + the fetch date
-    # for the ones we (re)pulled, so the next run can detect a backfill.
-    for y in years:
-        entry = manifest.get(str(y))
-        entry = entry if isinstance(entry, dict) else {}
-        entry["count"] = live_counts.get(y)
-        if y in to_fetch:
-            entry["fetched"] = today.isoformat()
-        manifest[str(y)] = entry
-    save_manifest(manifest)
-
-    parts = {y: RAW / f"_smd_pts_{y}.csv" for y in years}
-
-    # first pass: global service-type totals -> top-20 kept, rest -> "Other"
+    # first pass: global service totals -> top-20 kept, rest -> "Other". Grouped by
+    # the GRANULAR service (SERVICECODEDESCRIPTION), not the coarse handling agency.
     type_totals = Counter()
     for y in years:
-        with parts[y].open() as fh:
-            for _, _, t in csv.reader(fh):
-                type_totals[canon(t)] += 1
+        with files[y].open() as fh:
+            for r in csv.DictReader(fh):
+                type_totals[canon(r.get("service"))] += 1
     top = [t for t, _ in type_totals.most_common() if t != "Unknown type"][:TOP_TYPES]
     top_set = set(top)
     service_types = top + ["Other"]   # desc by volume, Other last
@@ -319,10 +211,11 @@ def main():
         ys = str(y)
         cy, uy = counts[ys], unmapped[ys]
         n = 0
-        with parts[y].open() as fh:
-            for lat, lon, raw in csv.reader(fh):
+        with files[y].open() as fh:
+            for r in csv.DictReader(fh):
                 n += 1
-                t = map_type(raw)
+                t = map_type(r.get("service"))
+                lat, lon = r.get("lat"), r.get("lon")
                 if not lat or not lon:
                     uy["__all__"]["no_latlon"] += 1
                     uy[t]["no_latlon"] += 1
