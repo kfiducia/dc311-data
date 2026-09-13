@@ -1,3 +1,10 @@
 .venv/
-data/raw/
 __pycache__/
+.DS_Store
+# DCD8: the raw 311 data now lives in git so CI only ever fetches the CURRENT
+# year (never re-pulling ~20 years each run). We track the immutable per-year
+# checkpoints (_<signal>_<year>.csv, _smd_pts_<year>.csv), the SMD boundaries
+# and the fetch manifest. The combined per-signal reports CSVs are DERIVED from
+# the checkpoints (regenerated every run by fetch.py), so they stay ignored to
+# avoid needless churn.
+data/raw/*_reports.csv

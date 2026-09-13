@@ -29,9 +29,11 @@ on:
         type: boolean
         default: false
 
-# Pages-artifact deploy needs these; no `contents: write` — nothing is pushed back.
+# Pages-artifact deploy needs pages/id-token; contents:write lets the full run
+# commit refreshed raw-data checkpoints back to main (DCD8) so the next run only
+# fetches the current year.
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -59,21 +61,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Carry per-year checkpoint CSVs (radar signals + SMD points) + the cached
-      # SMD boundary geojson between runs so we only pull the current partial year,
-      # not all history. `data/raw/` is gitignored (except the committed
-      # neighborhood_names.geojson), so this cache is the only thing that persists
-      # the fetched raw data. run_id-suffixed key always misses -> re-saved each
-      # run with the newest year folded in; restore-keys seeds from the latest.
-      - name: Restore raw-data checkpoints
-        if: ${{ !inputs.skip_build }}
-        uses: actions/cache@v4
-        with:
-          path: data/raw
-          key: dc311-raw-${{ github.run_id }}
-          restore-keys: |
-            dc311-raw-
-
+      # DCD8: the per-year raw checkpoints live IN git (see .gitignore), so the
+      # checkout already carries all prior years — no Actions cache needed. The
+      # "Invalidate current-year checkpoints" step below forces just the current,
+      # still-growing year to be re-pulled; everything else is reused as-is.
       - name: Install dependencies
         if: ${{ !inputs.skip_build }}
         run: pip install -r pipeline/requirements.txt
@@ -141,3 +132,21 @@ jobs:
       - name: Deploy to Pages
         id: deploy
         uses: actions/deploy-pages@v4
+
+      # DCD8: persist the refreshed raw checkpoints back to main so the next run
+      # reuses them and only fetches the current year. Only current-year files
+      # change (prior years are immutable), so the diff is small. Runs last, after
+      # a successful deploy; skipped on deploy-only runs. refresh.yml has no push
+      # trigger, so this commit does not re-trigger the workflow.
+      - name: Commit refreshed raw data
+        if: ${{ !inputs.skip_build }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/raw
+          if git diff --cached --quiet; then
+            echo "No raw-data changes to commit."
+          else
+            git commit -m "chore(data): refresh raw 311 checkpoints (current year)"
+            git push origin HEAD:main
+          fi

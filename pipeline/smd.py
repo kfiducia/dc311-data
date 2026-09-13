@@ -11,11 +11,12 @@ plus an explicit "unmapped" bucket (no lat/lon · outside any SMD) so no request
 is silently dropped.
 
 Mirrors the idioms in refresh_submission.py (_get 6× retry, year_layers) and the
-per-year CSV-checkpoint pattern in fetch.py. Rebuilds are cheap: prior years are
-immutable and reused from their cached CSV forever; the current year is re-pulled
-only when a fetch manifest shows its cache is older than CURRENT_YEAR_MAX_AGE_DAYS
-(DC backfills monthly at most). Delete data/raw/_smd_pts_<year>.csv (or the
-manifest entry) to force a re-pull. Safe to re-run.
+per-year CSV-checkpoint pattern in fetch.py. Rebuilds are cheap: the per-year
+checkpoints live in git (DCD8); prior years are reused as-is unless their source
+record count changed (a backfill), and the current year is always re-pulled. The
+manifest stores the last-seen per-year count as the change token. Delete
+data/raw/_smd_pts_<year>.csv (or its manifest entry) to force a re-pull. Safe to
+re-run.
 
 Run:  cd pipeline && ./.venv/bin/python smd.py
 """
@@ -44,14 +45,10 @@ SMD_LAYER = ("https://maps2.dcgis.dc.gov/dcgis/rest/services/DCGIS_DATA/"
 SMD_START_YEAR = 2016   # SMDs are 2023 boundaries; modern years are clean & bounded
 TOP_TYPES = 20          # top service categories kept; rest -> "Other"
 
-# Freshness policy for the per-year point checkpoints (data/raw/_smd_pts_<year>.csv):
-# prior years are immutable (DC's historical 311 doesn't change) so their cache is
-# reused forever; the current year is re-pulled only when its cached copy is older
-# than this many days, since DC backfills monthly at most — a full re-pull on every
-# rebuild is wasteful. A fetch manifest records when each year was last pulled, so
-# this survives cache restores (file mtime is reset by CI cache/checkout and can't
-# be trusted).
-CURRENT_YEAR_MAX_AGE_DAYS = 20
+# Freshness policy (DCD8): per-year point checkpoints (data/raw/_smd_pts_<year>.csv)
+# live in git. Prior years are immutable and reused as-is unless their source
+# record count changes (a backfill); the current year is always re-pulled. The
+# manifest stores the last-seen per-year count (the change token) + fetch date.
 MANIFEST = RAW / "smd_fetch_manifest.json"
 
 # The raw 2023 SMD boundaries are ~4 MB — far too heavy to ship to the browser for
@@ -93,7 +90,8 @@ def year_layers():
 
 
 def load_manifest():
-    """{year_str: fetched_iso_date} — when each year's checkpoint was last pulled."""
+    """{year_str: {"fetched": iso, "count": N}} — per-year fetch date + the source
+    record count we last saw (the change token; see DCD8 in fetch.py)."""
     if MANIFEST.exists():
         try:
             return json.loads(MANIFEST.read_text())
@@ -104,6 +102,16 @@ def load_manifest():
 
 def save_manifest(m):
     MANIFEST.write_text(json.dumps(m, indent=2, sort_keys=True))
+
+
+def year_counts(layers, years):
+    """{year: total record count} via returnCountOnly — the per-year change token."""
+    out = {}
+    for y in years:
+        d = _get(f"{C.ARCGIS_SERVICE}/{layers[y]}/query",
+                 {"where": "1=1", "returnCountOnly": "true", "f": "json"})
+        out[y] = d.get("count")
+    return out
 
 
 def _round_coords(obj, nd):
@@ -239,26 +247,31 @@ def main():
     current = max(layers)
 
     # Decide which years actually need a (re-)pull, so rebuilds don't re-fetch
-    # immutable history. Prior years: reuse the cached CSV if present. Current year:
-    # reuse unless its manifest age exceeds CURRENT_YEAR_MAX_AGE_DAYS.
+    # immutable history (DCD8). The committed per-year checkpoints are the store;
+    # a year is re-fetched only if its checkpoint is missing, it's the current
+    # year (points/closures land continuously), or its source count changed since
+    # we last stored it (a backfill to an old year).
     manifest = load_manifest()
     today = date.today()
+    live_counts = year_counts(layers, years)
 
     def needs_fetch(y):
         part = RAW / f"_smd_pts_{y}.csv"
         if not part.exists():
-            return True                       # no cache -> must fetch
-        if y != current:
-            return False                      # prior year -> immutable, reuse
-        fetched = manifest.get(str(y))        # current year -> age-gate
-        if not fetched:
-            return True
-        return (today - date.fromisoformat(fetched)).days >= CURRENT_YEAR_MAX_AGE_DAYS
+            return True                       # no checkpoint -> must fetch
+        if y == current:
+            return True                       # current year -> always refresh
+        prev = manifest.get(str(y))
+        prev = prev if isinstance(prev, dict) else {}
+        pc = prev.get("count")
+        # prior year: re-fetch ONLY if we have a stored count and it moved
+        # (a backfill). Unknown count -> trust the committed checkpoint.
+        return pc is not None and pc != live_counts.get(y)
 
     to_fetch = [y for y in years if needs_fetch(y)]
     reused = [y for y in years if y not in to_fetch]
     print(f"SMD build: years {years[0]}-{years[-1]} · "
-          f"fetch={to_fetch or '—'} · reuse cached={reused or '—'}", file=sys.stderr)
+          f"fetch={to_fetch or '—'} · reuse committed={reused or '—'}", file=sys.stderr)
 
     smd_ids, geoms, tree, labels, source_meta = load_smd_polygons()
     n_smd = len(smd_ids)
@@ -269,9 +282,16 @@ def main():
     if to_fetch:
         with ThreadPoolExecutor(max_workers=6) as ex:
             list(ex.map(lambda y: fetch_year_points(layers[y], y), to_fetch))
-        for y in to_fetch:
-            manifest[str(y)] = today.isoformat()
-        save_manifest(manifest)
+    # Record the source count for every year (the change token) + the fetch date
+    # for the ones we (re)pulled, so the next run can detect a backfill.
+    for y in years:
+        entry = manifest.get(str(y))
+        entry = entry if isinstance(entry, dict) else {}
+        entry["count"] = live_counts.get(y)
+        if y in to_fetch:
+            entry["fetched"] = today.isoformat()
+        manifest[str(y)] = entry
+    save_manifest(manifest)
 
     parts = {y: RAW / f"_smd_pts_{y}.csv" for y in years}
 
