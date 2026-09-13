@@ -5,18 +5,24 @@ web, desktop web, native app) and submission-volume trends.
 
 **Live dashboard:** https://kfiducia.github.io/dc311-data/
 
-- `dashboard.html` — submission methods + volume, plus a complaint-**category**
+- `dashboard.html` — submission methods + volume, plus two segmentation views
+  drawn from CityCast's neighborhood-311 analysis: a complaint-**category**
   breakdown by ward (top types, with the ever-present trash/parking/info
-  categories toggle-able so local outliers surface)
-- `early-warning.html` — **Complaint Radar**: one seasonal-anomaly detector over
-  several 311 signals (rats, DMV, dockless vehicles, trash-cart repair),
-  selectable from a picker
+  categories toggle-able), and a per-ward **anomaly board** — for the latest
+  complete month, which category is running most above that ward's own
+  same-month-in-prior-years normal (the reporter's method, run over every
+  category)
+- `early-warning.html` — **Complaint Radar**: one seasonal-anomaly detector,
+  selectable across signals **chosen data-driven** — rats (special, with a
+  dead-animal overlay) plus the top-N categories by volume, minus the ubiquitous
+  ones (`config.resolve_signals`, `RADAR_TOP_N`)
 - `submission_methods.md` — written findings
 - `export_*.csv` — underlying aggregate tables
 - `agg.json` — aggregated volume/method data behind the dashboard
 - `agg/signals.json` + `agg/<signal>_alerts.json` — radar manifest + per-signal
   detections
 - `agg/categories.json` — per-year, per-ward complaint-category cube
+- `agg/anomalies.json` — per-ward month-over-baseline anomaly board
 
 Volume figures use the full DC ArcGIS bulk dataset (4.97M requests, 2009–2026).
 Submission-method percentages are from per-request `source`/`origin` lookups
@@ -38,10 +44,11 @@ public ArcGIS API — no credentials needed — regenerates the artifacts, runs 
 freshness guardrail, and commits only if something changed:
 
 ```
-python pipeline/fetch.py              # radar: every SIGNALS service type + aux -> data/raw/
+python pipeline/fetch.py              # radar: every resolve_signals() service type + aux -> data/raw/
 python pipeline/build.py              # radar aggregates -> agg/<signal>_alerts.json + signals.json
 python pipeline/refresh_submission.py # submission volume (current year) -> agg.json + dashboards
 python pipeline/categories.py         # complaint-category cube -> agg/categories.json
+python pipeline/anomaly.py            # per-ward month-over-baseline board -> agg/anomalies.json
 python pipeline/guardrail.py          # fail if a pull is truncated/empty or the window regressed
 ```
 

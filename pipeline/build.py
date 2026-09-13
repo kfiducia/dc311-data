@@ -386,7 +386,7 @@ def build_signal(sig, name_pts):
 def main():
     name_pts = load_name_points()
     manifest = []
-    for sig in C.SIGNALS:
+    for sig in C.resolve_signals():
         entry = build_signal(sig, name_pts)
         if entry:
             manifest.append(entry)

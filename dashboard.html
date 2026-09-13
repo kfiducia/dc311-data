@@ -314,6 +314,26 @@
     display: flex; align-items: center; gap: .45rem; cursor: pointer;
   }
   .cat-toggle input { accent-color: var(--accent); cursor: pointer; }
+  /* DCD6 anomaly board */
+  .anom-list { display: flex; flex-direction: column; margin-top: .5rem; }
+  .anom-row {
+    display: grid; grid-template-columns: 58px 1fr auto; gap: .7rem; align-items: center;
+    padding: .35rem 0; border-bottom: 1px solid var(--line);
+  }
+  .anom-row .mult {
+    font-family: var(--display); font-size: 1.2rem; color: var(--accent); text-align: right;
+  }
+  .anom-barwrap { position: relative; height: 22px; background: var(--cream-2); }
+  .anom-bar { height: 100%; background: color-mix(in srgb, var(--accent) 26%, transparent);
+    border-right: 2px solid var(--accent); min-width: 2px; }
+  .anom-row .lbl {
+    position: absolute; left: 8px; top: 0; height: 22px; display: flex; align-items: center;
+    font-family: var(--mono); font-size: .72rem; color: var(--ink);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 10px);
+  }
+  .anom-row .lbl .wd { color: var(--muted); margin-right: .4rem; }
+  .anom-row .cnt { font-family: var(--mono); font-size: .68rem; color: var(--ink-2); white-space: nowrap; }
+  .anom-empty { color: var(--muted); font-family: var(--mono); font-size: .72rem; padding: .6rem 0; }
 
   @media (max-width: 880px) {
     .grid { grid-template-columns: 1fr; }
@@ -370,6 +390,22 @@
         <span class="hint" id="cat-hint"></span>
       </div>
       <div class="wrap-canvas" style="min-height:400px"><canvas id="catbar"></canvas></div>
+    </div>
+  </div>
+
+  <!-- DCD6: per-ward "what's unusually high" board (agg/anomalies.json). -->
+  <div class="grid cat-grid">
+    <div class="card wide">
+      <h2>What's unusually high right now — by ward</h2>
+      <p>The method behind CityCast's piece, run over <em>every</em> category: for the
+         latest complete month, how far each complaint is above that ward's own
+         normal for the same month in prior years. Trash / parking / info excluded.
+         Pick a ward, or see the citywide leaderboard. <span id="anom-when"></span></p>
+      <div class="yearbar cat-controls" style="margin-top:.35rem">
+        <span class="l">Area</span><select id="anom-ward"></select>
+        <span class="hint" id="anom-hint"></span>
+      </div>
+      <div id="anom-list" class="anom-list"></div>
     </div>
   </div>
 
@@ -673,6 +709,54 @@ document.getElementById('note').innerHTML =
         scales:{ x:{grid:{color:LINE},ticks:{callback:function(v){return v>=1000?(v/1000)+'k':v;}}},
           y:{grid:{display:false}} } } });
   }
+})();
+
+// ---- DCD6: per-ward "what's unusually high" board (the article's method) ----
+(function(){
+  var wardSel=document.getElementById('anom-ward'),
+      hint=document.getElementById('anom-hint'),
+      whenEl=document.getElementById('anom-when'),
+      list=document.getElementById('anom-list');
+  if(!list) return;
+  var A=null;
+  fetch('agg/anomalies.json').then(function(r){ return r.ok?r.json():Promise.reject(r.status); })
+    .then(init)
+    .catch(function(err){ var box=list.closest('.cat-grid'); if(box) box.style.display='none';
+      console.warn('anomalies.json unavailable:', err); });
+  function monthName(ym){
+    var p=(ym||'').split('-'); if(p.length<2) return ym;
+    var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return M[(+p[1])-1]+' '+p[0];
+  }
+  function init(d){
+    A=d;
+    if(whenEl) whenEl.textContent='Latest complete month: '+monthName(d.month)+'.';
+    wardSel.innerHTML='<option value="__board">Citywide leaderboard</option>'+
+      d.wards.map(function(w){return '<option value="'+w+'">'+w+'</option>';}).join('');
+    wardSel.addEventListener('change', render);
+    render();
+  }
+  function render(){
+    var ward=wardSel.value;
+    var rows = ward==='__board' ? A.board : (A.by_ward[ward]||[]);
+    var showWard = ward==='__board';
+    hint.textContent = (rows.length? rows.length+' standout'+(rows.length>1?'s':'') : 'nothing unusual')+
+      ' · vs '+A.baseline_desc;
+    if(!rows.length){ list.innerHTML='<div class="anom-empty">No categories running notably above '+
+      (showWard?'their':'this ward’s')+' seasonal normal this month.</div>'; return; }
+    var maxR=Math.max.apply(null, rows.map(function(r){return r.ratio;}));
+    list.innerHTML=rows.map(function(r){
+      var w=Math.max(4, Math.round(100*r.ratio/maxR));
+      var wtag = showWard ? '<span class="wd">'+r.ward.replace('Ward ','W')+'</span>' : '';
+      return '<div class="anom-row">'+
+        '<span class="mult">×'+r.ratio+'</span>'+
+        '<span class="anom-barwrap"><span class="anom-bar" style="width:'+w+'%"></span>'+
+          '<span class="lbl">'+wtag+esc(r.label)+'</span></span>'+
+        '<span class="cnt">'+r.recent.toLocaleString()+' vs ~'+r.baseline+'</span>'+
+      '</div>';
+    }).join('');
+  }
+  function esc(s){ return String(s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
 })();
 </script>
 </body>

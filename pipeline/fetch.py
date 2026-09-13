@@ -111,8 +111,9 @@ def fetch_signal(key, where, layers, years):
 
 
 def iter_signals():
-    """Every fetchable (key, where) pair: each detect signal plus its aux signals."""
-    for sig in C.SIGNALS:
+    """Every fetchable (key, where) pair: each detect signal plus its aux signals.
+    Signal set is resolved live (rats + top-N categories by volume)."""
+    for sig in C.resolve_signals():
         yield sig["key"], C.signal_where(sig)
         for a in sig.get("aux", []):
             yield a["key"], C.signal_where(a)
