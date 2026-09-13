@@ -1,0 +1,10 @@
+[   10552ms] TypeError: Cannot read properties of undefined (reading 'handleEvent')
+    at Object.afterEvent (http://localhost:8080/chart.umd.min.js:19:178130)
+    at d (http://localhost:8080/chart.umd.min.js:13:1113)
+    at sn._notify (http://localhost:8080/chart.umd.min.js:19:83027)
+    at sn.notify (http://localhost:8080/chart.umd.min.js:19:82848)
+    at An.notifyPlugins (http://localhost:8080/chart.umd.min.js:19:101830)
+    at An._eventHandler (http://localhost:8080/chart.umd.min.js:19:102487)
+    at s (http://localhost:8080/chart.umd.min.js:19:100366)
+    at An.<anonymous> (http://localhost:8080/chart.umd.min.js:19:43474)
+    at http://localhost:8080/chart.umd.min.js:13:5410

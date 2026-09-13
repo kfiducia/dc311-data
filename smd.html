@@ -151,6 +151,19 @@
   .foot-inner a:hover { color: var(--accent); }
   .foot-inner .ast { color: var(--accent); }
   @media (max-width: 880px) { .foot-inner { flex-direction: column; gap: .85rem; } }
+
+  /* ─── Drill-down card ─── */
+  .drill { position: relative; }
+  .drill-clear { position:absolute; top:1rem; right:1.1rem; background:var(--cream-2);
+    border:1px solid var(--line); color:var(--ink-2); font-family:var(--mono);
+    font-size:.68rem; letter-spacing:.08em; padding:.3rem .6rem; cursor:pointer; }
+  .drill-clear:hover { color:var(--accent); border-color:var(--accent); }
+  .drill-grid { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin-top:.8rem; }
+  @media (max-width:880px){ .drill-grid{ grid-template-columns:1fr; } }
+  .dh { font-family:var(--mono); font-size:.72rem; font-weight:600; letter-spacing:.06em;
+    color:var(--ink-2); margin:0 0 .5rem; }
+  .dh .muted, .muted { color:var(--muted); font-weight:400; }
+  .empty { font-family:var(--mono); font-size:.72rem; color:var(--muted); padding:1.5rem .4rem; }
 </style>
 </head>
 <body>
@@ -199,6 +212,24 @@
     <p id="unmapped"></p>
   </div>
 
+  <div class="card drill" id="drill" hidden>
+    <button class="drill-clear" id="drillClear">clear ✕</button>
+    <h2 id="drillTitle">—</h2>
+    <p id="drillSub">Requests inside this district, by service type.</p>
+    <div class="drill-grid">
+      <div>
+        <p class="dh">Requests by type <span id="drillYearLab" class="muted"></span></p>
+        <div class="scroll-canvas"><div class="wrap-canvas" id="drillTypeWrap"><canvas id="drillType"></canvas></div></div>
+        <p class="empty" id="drillTypeEmpty" hidden></p>
+      </div>
+      <div>
+        <p class="dh">Requests over time, by type <span class="muted">(all years)</span></p>
+        <div class="wrap-canvas" style="min-height:320px"><canvas id="drillTime"></canvas></div>
+        <p class="empty" id="drillTimeEmpty" hidden></p>
+      </div>
+    </div>
+  </div>
+
 </main>
 
 <footer>
@@ -221,6 +252,7 @@ Chart.defaults.font.size = 11;
 
 const TOP_N = 40;         // rows shown unless "Show all"
 const sum = a => a.reduce((s, x) => s + (x || 0), 0);
+const PAL = ['#d97e3f','#3d7d8c','#3f8f5b','#c0392b','#7b5ea7','#c8a24a']; // accent, teal, green, red, purple, gold
 
 Promise.all([
   fetch('agg/smd.json').then(r => r.json()),
@@ -231,6 +263,7 @@ function init(D, geo) {
   const yearSel = document.getElementById('year');
   const typeSel = document.getElementById('type');
   const showAll = document.getElementById('showAll');
+  let selected = null, drillType = null, drillTime = null;
 
   // provenance line (AC5)
   const bs = D.boundary_source || {};
@@ -246,6 +279,11 @@ function init(D, geo) {
   // type selector: "All types" (__all__) + service_types
   typeSel.innerHTML = '<option value="__all__">All types</option>' +
     D.service_types.map(t => `<option value="${t}">${t}</option>`).join('');
+
+  // default the year to the current calendar year (AC1); fall back to latest available
+  const curCal = new Date().getFullYear();
+  const CUR = D.years.includes(curCal) ? curCal : D.years[D.years.length - 1];
+  yearSel.value = String(CUR);
 
   let chart = null;
 
@@ -288,6 +326,7 @@ function init(D, geo) {
     const labels = rows.map(r => r[0]).concat(['Unmapped/Unknown']);
     const data = rows.map(r => r[1]).concat([no + out]);
     const colors = rows.map(() => ACCENT).concat([MUTED]);
+    const borders = rows.map(r => r[0] === selected ? cssv('--ink') : 'transparent').concat(['transparent']);
 
     // scale container height so all rows stay legible & scrollable (AC2)
     const container = document.querySelector('.wrap-canvas');
@@ -296,11 +335,20 @@ function init(D, geo) {
     if (chart) chart.destroy();
     chart = new Chart(document.getElementById('smdbar'), {
       type: 'bar',
-      data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 0 }] },
+      data: { labels, datasets: [{ data, backgroundColor: colors, borderColor: borders, borderWidth: 2 }] },
       options: {
         indexAxis: 'y',
         maintainAspectRatio: false,
         responsive: true,
+        onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+        onClick: (e, els) => {
+          if (!els.length) return;
+          const id = chart.data.labels[els[0].index];
+          if (id === 'Unmapped/Unknown') return;   // synthetic trailing bucket, not an SMD
+          // defer: selectSmd → render() destroys this very chart; let Chart.js finish
+          // dispatching the current click event before we tear it down
+          setTimeout(() => selectSmd(id), 0);
+        },
         plugins: { legend: { display: false },
           tooltip: { callbacks: { label: c => c.parsed.x.toLocaleString() + ' requests' } } },
         scales: {
@@ -356,9 +404,89 @@ function init(D, geo) {
       ` · max ${max.toLocaleString()} in one SMD · ${yr}, ${ty}`;
   }
 
+  // ---- drill-down: select an SMD, break it down (AC2–AC5) ----
+  function selectSmd(id) {
+    selected = id;
+    render();                                   // re-paints ranked chart → highlights the bar
+    const idx = D.smds.indexOf(id);
+    const label = (D.smd_labels && D.smd_labels[id]) || id;
+    document.getElementById('drill').hidden = false;
+    document.getElementById('drillTitle').textContent = `${id} — ${label}`;
+    renderDrillType(idx);
+    renderDrillTime(idx);
+    document.getElementById('drill').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // requests by service type for this SMD, honoring the active year filter (AC3)
+  function renderDrillType(idx) {
+    const y = yearSel.value;                                   // 'all' | "<year>"
+    const yrs = (y === 'all') ? D.years.map(String) : [String(y)];
+    const rows = D.service_types.map(t => {
+      let v = 0; yrs.forEach(ys => v += ((D.counts[ys] && D.counts[ys][t]) || [])[idx] || 0);
+      return [t, v];
+    }).filter(r => r[1] > 0).sort((a, b) => b[1] - a[1]);
+
+    document.getElementById('drillYearLab').textContent = (y === 'all') ? '(all years)' : `(${y})`;
+    const empty = document.getElementById('drillTypeEmpty');
+    const canvas = document.getElementById('drillType');
+    if (drillType) drillType.destroy();
+    if (!rows.length) {                                        // AC5 empty state
+      canvas.style.display = 'none'; empty.hidden = false;
+      empty.textContent = `No requests ${y === 'all' ? 'on record' : 'in ' + y} for this district.`;
+      return;
+    }
+    canvas.style.display = ''; empty.hidden = true;
+    document.getElementById('drillTypeWrap').style.height = (rows.length * 18 + 60) + 'px';
+    drillType = new Chart(canvas, {
+      type: 'bar',
+      data: { labels: rows.map(r => r[0]), datasets: [{ data: rows.map(r => r[1]), backgroundColor: ACCENT, borderWidth: 0 }] },
+      options: { indexAxis: 'y', maintainAspectRatio: false, responsive: true,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => c.parsed.x.toLocaleString() + ' requests' } } },
+        scales: { x: { beginAtZero: true, grid: { color: LINE }, ticks: { callback: v => v.toLocaleString() } },
+                  y: { grid: { display: false }, ticks: { autoSkip: false, font: { size: 10 } } } } }
+    });
+  }
+
+  // requests over time for this SMD, split by top-6 types + folded remainder (AC4)
+  function renderDrillTime(idx) {
+    const tot = D.service_types.map(t => {
+      let v = 0; D.years.forEach(y => v += ((D.counts[String(y)] && D.counts[String(y)][t]) || [])[idx] || 0);
+      return [t, v];
+    }).filter(r => r[1] > 0).sort((a, b) => b[1] - a[1]);
+
+    const empty = document.getElementById('drillTimeEmpty');
+    const canvas = document.getElementById('drillTime');
+    if (drillTime) drillTime.destroy();
+    if (!tot.length) {                                         // AC5 empty state
+      canvas.style.display = 'none'; empty.hidden = false;
+      empty.textContent = 'No requests on record for this district.'; return;
+    }
+    canvas.style.display = ''; empty.hidden = true;
+    const keep = tot.slice(0, 6).map(r => r[0]), rest = tot.slice(6).map(r => r[0]);
+    const ds = keep.map((t, k) => ({ label: t,
+      data: D.years.map(y => ((D.counts[String(y)] && D.counts[String(y)][t]) || [])[idx] || 0),
+      borderColor: PAL[k], borderWidth: 1.4, pointRadius: 0, tension: .25 }));
+    if (rest.length) ds.push({ label: 'All other types',
+      data: D.years.map(y => rest.reduce((s, t) => s + (((D.counts[String(y)] && D.counts[String(y)][t]) || [])[idx] || 0), 0)),
+      borderColor: MUTED, borderDash: [4, 3], borderWidth: 1.2, pointRadius: 0, tension: .25 });
+    drillTime = new Chart(canvas, {
+      type: 'line', data: { labels: D.years, datasets: ds },
+      options: { maintainAspectRatio: false, responsive: true, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { labels: { boxWidth: 12, font: { size: 10 } } } },
+        scales: { x: { type: 'category', grid: { display: false } },
+                  y: { beginAtZero: true, grid: { color: LINE }, ticks: { callback: v => v.toLocaleString() } } } }
+    });
+  }
+
   function renderAll() { render(); renderMap(); }
-  [yearSel, typeSel].forEach(el => el.addEventListener('change', renderAll));
+  // year/type changes re-sort the bar + map and refresh the by-type drill for the new filter;
+  // the over-time drill is year-filter-independent (its purpose is the multi-year trend)
+  function onControlChange() { renderAll(); if (selected != null) renderDrillType(D.smds.indexOf(selected)); }
+  [yearSel, typeSel].forEach(el => el.addEventListener('change', onControlChange));
   showAll.addEventListener('change', render);   // "show all 345" only affects the bar list
+  document.getElementById('drillClear').onclick = () => {
+    selected = null; document.getElementById('drill').hidden = true; render();
+  };
   renderAll();
 }
 </script>
