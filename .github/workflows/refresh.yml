@@ -64,15 +64,22 @@ jobs:
       - name: Invalidate current-year checkpoints
         run: rm -f data/raw/_*_$(date -u +%Y).csv
 
-      # Rat-radar / early-warning: pull rodent + dead-animal reports, rebuild.
-      - name: Fetch rat-radar source data
+      # Complaint Radar / early-warning: pull every configured signal (rodent +
+      # dead-animal, DMV, dockless, trash-can) and rebuild all per-signal alerts
+      # + the signals.json manifest the picker reads.
+      - name: Fetch radar source data
         run: python pipeline/fetch.py
-      - name: Build rat-radar aggregates
+      - name: Build radar aggregates
         run: python pipeline/build.py
 
       # Submission-volume: refresh the current year straight from the live API.
       - name: Refresh submission volume
         run: python pipeline/refresh_submission.py
+
+      # Complaint categories (dashboard.html "what are people complaining about?"):
+      # one cheap group-by request per year -> agg/categories.json.
+      - name: Build complaint-category breakdown
+        run: python pipeline/categories.py
 
       # Fail loudly if the pull came back truncated/empty or the window regressed,
       # BEFORE anything is committed.
@@ -84,7 +91,10 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add agg.json agg/rodent_alerts.json \
+          git add agg.json \
+                  agg/rodent_alerts.json agg/dmv_alerts.json \
+                  agg/dockless_alerts.json agg/trashcan_alerts.json \
+                  agg/signals.json agg/categories.json \
                   export_by_month.csv export_by_year.csv \
                   dashboard.html index.html
           if git diff --cached --quiet; then

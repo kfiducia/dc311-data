@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DC Rat Radar — Neighborhood Early Warning</title>
-<meta name="description" content="Where DC rats are hot now, what's trending, which spikes we could have caught early, and whether abatement is working — seasonal aberration detection on 311 data.">
+<title>DC Complaint Radar — Neighborhood Early Warning</title>
+<meta name="description" content="Where DC 311 complaints are hot now by neighborhood, what's trending, and which spikes we could have caught early — seasonal aberration detection across rats, DMV issues, dockless vehicles, trash-can repair and more.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -44,6 +44,12 @@
   .tag{display:inline-block;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--accent);
     border:1px solid var(--line);border-radius:2px;padding:3px 8px;margin-bottom:12px}
   .asof{color:var(--muted);font-size:12px;margin:0 0 14px}
+  /* DCD6 signal picker */
+  .sigbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px}
+  .sigbar label{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--ink-2)}
+  .sigbar label::before{content:"> ";color:var(--accent)}
+  .sigbar select{width:auto;min-width:240px}
+  .sigbar .sighint{font-size:11.5px;color:var(--muted)}
   /* impact strip */
   .impact{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:1px;margin:6px 0 22px;
     background:var(--line);border:1px solid var(--good);border-radius:5px;overflow:hidden}
@@ -137,14 +143,19 @@
 </head>
 <body>
 <header><div class="wrap" style="max-width:1240px;margin:0 auto">
-  <a class="brand" href="index.html" style="color:inherit"><span class="rat">▚</span> dc rat radar</a>
+  <a class="brand" href="index.html" style="color:inherit"><span class="rat">▚</span> dc complaint radar</a>
   <nav><a href="index.html">all dashboards</a><a href="dashboard.html">submission methods</a><a href="https://rats.districtjosh.com/" target="_blank" rel="noopener">districtjosh map ↗</a></nav>
 </div></header>
 
 <div class="wrap">
   <span class="tag" id="signalTag">signal · rodent reports</span>
-  <h1>Where are the rats — and where were we too slow?</h1>
-  <p class="lede">Live read on DC rat reports: where it's <strong>hot right now</strong>, what's <strong>trending up</strong>, which recent surges we <strong>could have caught early</strong>, and whether <strong>abatement is actually driving reports down</strong>. Detection runs per hex, labeled by neighborhood, scored causally so "should-have-known" dates are honest.</p>
+  <div class="sigbar">
+    <label for="signalSel">Radar signal</label>
+    <select id="signalSel"></select>
+    <span class="sighint">same seasonal-anomaly engine, re-pointed at any 311 service type</span>
+  </div>
+  <h1 id="pageTitle">Where are the rats — and where were we too slow?</h1>
+  <p class="lede" id="lede">Live read on DC rat reports: where it's <strong>hot right now</strong>, what's <strong>trending up</strong>, which recent surges we <strong>could have caught early</strong>, and whether <strong>abatement is actually driving reports down</strong>. Detection runs per hex, labeled by neighborhood, scored causally so "should-have-known" dates are honest.</p>
   <p class="asof" id="asof">—</p>
 
   <!-- IMPACT STRIP: does reporting work? -->
@@ -205,7 +216,7 @@
       <p>Anyone can plot a line that rises in summer. The hard part is separating a <em>real, actionable surge</em> from ordinary seasonality and years-long growth, dating it honestly using only what was knowable at the time, and then asking whether the response actually worked. That's the whole pipeline — and it re-points at <strong>any</strong> 311 service type, not just rats.</p>
     </div>
     <div class="steps">
-      <div class="step"><span class="num">01</span><h3>Ingest</h3><p>Every geolocated rodent report <em>and</em> its ticket-closure date, straight from DC's live 311 API, back to 2018.</p><span class="code">DC Open Data · S0311</span></div>
+      <div class="step"><span class="num">01</span><h3>Ingest</h3><p>Every geolocated report for the selected signal <em>and</em> its ticket-closure date, straight from DC's live 311 API, back to 2018.</p><span class="code" id="ingestCode">DC Open Data · S0311</span></div>
       <div class="step"><span class="num">02</span><h3>Locate</h3><p>Each report snapped to an H3 hexagon and labeled with its nearest single DC neighborhood — fine, uniform, no merged clusters.</p><span class="code">res-8 hex · 132 nbhd names</span></div>
       <div class="step"><span class="num">03</span><h3>Seasonal baseline</h3><p>Expected count = the same week-of-year in <em>prior</em> years. Kills the "everything spikes in July" false alarm.</p><span class="code">±3-week window</span></div>
       <div class="step"><span class="num">04</span><h3>Trend correction</h3><p>A trailing multiplier tracks each area's current trajectory, so a decade of growth isn't a permanent alarm.</p><span class="code">adaptive level</span></div>
@@ -234,11 +245,44 @@ function pearson(a,b){const n=Math.min(a.length,b.length);let sa=0,sb=0;
   for(let i=0;i<n;i++){const x=a[i]-ma,y=b[i]-mb;c+=x*y;va+=x*x;vb+=y*y;}
   return (va&&vb)?c/Math.sqrt(va*vb):0;}
 
-fetch('agg/rodent_alerts.json').then(r=>r.json()).then(init);
+/* ---------- signal picker (DCD6): one engine, many 311 service types ---------- */
+const SIGNAL_FILES={};
+function loadSignal(key){
+  const url=SIGNAL_FILES[key]||('agg/'+key+'_alerts.json');
+  return fetch(url).then(r=>r.json()).then(data=>{A.signalKey=key;init(data);})
+    .catch(err=>console.error('failed to load signal',key,err));
+}
+fetch('agg/signals.json').then(r=>r.ok?r.json():Promise.reject('no manifest')).then(m=>{
+  const sel=document.getElementById('signalSel'), sigs=(m&&m.signals)||[];
+  sigs.forEach(s=>SIGNAL_FILES[s.key]=s.file);
+  if(sel&&sigs.length){
+    sel.innerHTML=sigs.map(s=>`<option value="${s.key}">${s.label}</option>`).join('');
+    sel.onchange=()=>loadSignal(sel.value);
+    loadSignal(sigs[0].key);
+  } else { loadSignal('rodent'); }
+}).catch(()=>{ // no manifest yet -> single-signal fallback, hide the (empty) picker
+  const bar=document.querySelector('.sigbar'); if(bar) bar.style.display='none';
+  fetch('agg/rodent_alerts.json').then(r=>r.json()).then(init);
+});
 
 function init(data){
+  // Re-entrant: switching signals tears down the previous map/chart/playback first.
+  if(A.playing) stopPlay();
+  if(A.map){ A.map.remove(); A.map=null; }
+  if(A.chart){ A.chart.destroy(); A.chart=null; }
+  A.current=null; A.aux0=null;
   A.data=data; A.weeks=data.week_start; A.nEnd=A.weeks.length-1;
-  document.getElementById('signalTag').textContent='signal · '+data.signal_label.toLowerCase();
+  A.noun=(data.signal_label||'reports').toLowerCase();
+  const isRodent=data.signal==='rodent';
+  document.getElementById('signalTag').textContent='signal · '+A.noun;
+  document.getElementById('pageTitle').textContent=isRodent
+    ? 'Where are the rats — and where were we too slow?'
+    : 'Where is '+data.signal_label+' spiking — and where were we too slow?';
+  document.getElementById('lede').innerHTML=isRodent
+    ? 'Live read on DC rat reports: where it\'s <strong>hot right now</strong>, what\'s <strong>trending up</strong>, which recent surges we <strong>could have caught early</strong>, and whether <strong>abatement is actually driving reports down</strong>. Detection runs per hex, labeled by neighborhood, scored causally so "should-have-known" dates are honest.'
+    : 'Live read on DC <strong>'+A.noun+'</strong> 311 reports: where it\'s <strong>hot right now</strong> vs. each neighborhood\'s seasonal normal, what\'s <strong>trending up</strong>, and which recent surges we <strong>could have caught early</strong>. Same detector as the rat radar, re-pointed at this service type.';
+  const ic=document.getElementById('ingestCode');
+  if(ic) ic.textContent='DC Open Data · '+((data.generated_from&&data.generated_from.where)||data.signal);
   document.getElementById('resLab').textContent=data.detect_res;
   document.getElementById('heatResLab').textContent=data.heat_res;
   document.getElementById('asof').textContent=
@@ -286,12 +330,12 @@ function buildImpact(){
     <div class="lead">
       <div class="eyebrow">Does reporting actually work?</div>
       <h2>${cool?'Yes — it moves the needle.':'The signal is mixed.'}</h2>
-      <p>When neighbors report and DPW closes the tickets, rat reports tend to fall <em>below</em> the seasonal norm in the following weeks. Observational, so it's suggestive rather than proof — but the pattern holds across the city.</p>
+      <p>When neighbors report and the city closes the tickets, ${A.noun} tend to fall <em>below</em> the seasonal norm in the following weeks. Observational, so it's suggestive rather than proof — but the pattern holds across the city.</p>
     </div>
     <div class="stat"><b>${cooled}/${measured}</b><span>neighborhoods measurably cooled after treatment · ${worse}</span></div>
-    <div class="stat"><b>${close.median_days??'—'} days</b><span>median time to close a rat ticket</span></div>
+    <div class="stat"><b>${close.median_days??'—'} days</b><span>median time to close a ticket</span></div>
     <div class="stat"><b>${close.pct_7d??'—'}%</b><span>of tickets closed within a week</span></div>
-    <div class="cta">🐀 See a rat? <b>Report it — 311 or dc.gov/311.</b> The data shows the follow-up brings the numbers down.</div>`;
+    <div class="cta">📣 See an issue? <b>Report it — 311 or dc.gov/311.</b> The data shows the follow-up brings the numbers down.</div>`;
 }
 
 /* ---------- situation board ---------- */
@@ -474,7 +518,7 @@ function renderEpisodes(u){
     const lead=e.lead_weeks;
     const warn=lead>=2?`<span class="warn">${lead} weeks' warning before peak</span>`:lead>0?`${lead} week lead`:'peaked on detection';
     return `<div class="ep ${lead>=2?'lead':''}" data-si="${e.start_i}" data-pi="${e.peak_i}">
-      <div class="d">🐀 flagged <strong>${dateShort(e.start)}</strong> → peak ${dateShort(e.peak)}</div>
+      <div class="d">⚑ flagged <strong>${dateShort(e.start)}</strong> → peak ${dateShort(e.peak)}</div>
       <div class="m">${e.peak_obs} reports at peak${pct!=null?` (+${pct}% vs expected)`:''} · ${warn}</div></div>`;}).join('');
   box.querySelectorAll('.ep').forEach(el=>el.onclick=()=>zoomChart(+el.dataset.si,+el.dataset.pi));
 }

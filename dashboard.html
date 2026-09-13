@@ -306,6 +306,15 @@
   .foot-inner a:hover { color: var(--accent); }
   .foot-inner .ast { color: var(--accent); }
 
+  /* DCD6 category view */
+  .cat-grid { margin-bottom: 1.5rem; }
+  .cat-toggle {
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--ink-2);
+    display: flex; align-items: center; gap: .45rem; cursor: pointer;
+  }
+  .cat-toggle input { accent-color: var(--accent); cursor: pointer; }
+
   @media (max-width: 880px) {
     .grid { grid-template-columns: 1fr; }
     .foot-inner { flex-direction: column; gap: .85rem; }
@@ -317,7 +326,7 @@
 <nav class="nav">
   <div class="nav-inner">
     <a href="index.html" class="nav-back">all dashboards</a>
-    <a href="early-warning.html" class="nav-tag">🐀 Rat Radar</a>
+    <a href="early-warning.html" class="nav-tag">▚ Complaint Radar</a>
   </div>
 </nav>
 
@@ -344,6 +353,25 @@
       </a>
     </div>
   </header>
+
+  <!-- DCD6: complaint-category breakdown (data fetched from agg/categories.json). -->
+  <div class="grid cat-grid">
+    <div class="card wide" style="min-height:560px">
+      <h2>What are people complaining about?</h2>
+      <p>Top 311 categories, citywide or by ward. Inspired by CityCast's
+         neighborhood 311 breakdown — because it is <i>always</i> trash-and-parking
+         season in D.C., the default view hides those ever-present categories (plus
+         information requests) so the local outliers actually surface.</p>
+      <div class="yearbar cat-controls" style="margin-top:.35rem">
+        <span class="l">Area</span><select id="cat-ward"></select>
+        <span class="l">Year</span><select id="cat-year"></select>
+        <label class="cat-toggle"><input type="checkbox" id="cat-exclude" checked>
+          Hide trash · parking · info</label>
+        <span class="hint" id="cat-hint"></span>
+      </div>
+      <div class="wrap-canvas" style="min-height:400px"><canvas id="catbar"></canvas></div>
+    </div>
+  </div>
 
   <div class="kpis" id="kpis"></div>
 
@@ -588,6 +616,63 @@ document.getElementById('note').innerHTML =
   if (through) bits.push('Volume data through ' + through);
   if (gen) bits.push('last refreshed ' + gen);
   el.textContent = bits.join(' · ');
+})();
+
+// ---- DCD6: complaint categories, citywide or by ward (fetched at runtime) ----
+(function(){
+  var wardSel=document.getElementById('cat-ward'),
+      yearSel=document.getElementById('cat-year'),
+      exToggle=document.getElementById('cat-exclude'),
+      hint=document.getElementById('cat-hint'),
+      canvas=document.getElementById('catbar');
+  if(!canvas) return;
+  var CAT=null, chart=null; var TOP=15;
+  fetch('agg/categories.json').then(function(r){ return r.ok?r.json():Promise.reject(r.status); })
+    .then(init)
+    .catch(function(err){                              // no cube yet -> hide the section, don't error
+      var box=canvas.closest('.cat-grid'); if(box) box.style.display='none';
+      console.warn('categories.json unavailable:', err);
+    });
+  function init(d){
+    CAT=d;
+    wardSel.innerHTML='<option value="__city">Citywide</option>'+
+      d.wards.map(function(w){return '<option value="'+w+'">'+w+'</option>';}).join('');
+    yearSel.innerHTML=d.years.slice().reverse().map(function(y){return '<option value="'+y+'">'+y+'</option>';}).join('')+
+      '<option value="__all">All years</option>';
+    [wardSel,yearSel,exToggle].forEach(function(el){ el.addEventListener('change', render); });
+    render();
+  }
+  function tally(){
+    var ward=wardSel.value, year=yearSel.value;
+    var ex={}; if(exToggle.checked) (CAT.exclude||[]).forEach(function(c){ ex[c]=1; });
+    var acc={};
+    function add(obj){ if(!obj) return; for(var c in obj){ if(c==='__other__'||ex[c]) continue; acc[c]=(acc[c]||0)+obj[c]; } }
+    var years = year==='__all' ? CAT.years.map(String) : [year];
+    years.forEach(function(y){
+      if(ward==='__city') add(CAT.citywide[y]);
+      else add((CAT.by_ward[y]||{})[ward]);
+    });
+    return Object.keys(acc).map(function(c){return [c,acc[c]];}).sort(function(a,b){return b[1]-a[1];});
+  }
+  function render(){
+    var all=tally();
+    var total=all.reduce(function(s,r){return s+r[1];},0);
+    var rows=all.slice(0,TOP);
+    var labels=rows.map(function(r){ var l=(CAT.labels[r[0]]||r[0]); return l.length>34?l.slice(0,32)+'…':l; });
+    var data=rows.map(function(r){return r[1];});
+    var areaLbl=wardSel.value==='__city'?'citywide':wardSel.value;
+    var yearLbl=yearSel.value==='__all'?'all years':yearSel.value;
+    hint.textContent=total.toLocaleString()+' requests · '+areaLbl+' · '+yearLbl+
+      (exToggle.checked?' · routine hidden':'');
+    if(chart) chart.destroy();
+    chart=new Chart(canvas, { type:'bar',
+      data:{ labels:labels, datasets:[{ data:data, backgroundColor:ACCENT }] },
+      options:{ indexAxis:'y', maintainAspectRatio:false,
+        plugins:{ legend:{display:false},
+          tooltip:{callbacks:{label:function(c){return c.raw.toLocaleString()+' requests ('+pct(c.raw,total)+')';}}}},
+        scales:{ x:{grid:{color:LINE},ticks:{callback:function(v){return v>=1000?(v/1000)+'k':v;}}},
+          y:{grid:{display:false}} } } });
+  }
 })();
 </script>
 </body>

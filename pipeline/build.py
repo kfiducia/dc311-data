@@ -1,7 +1,8 @@
 """Turn raw reports into hex weekly series + causal spike alerts + abatement.
 
 Reads   data/raw/<signal>_reports.csv   (date, lat, lon, ward, resolved)
-Writes  agg/<signal>_alerts.json         (consumed by the dashboard)
+Writes  agg/<signal>_alerts.json         (one per config.SIGNALS entry)
+        agg/signals.json                 (manifest the dashboard's picker reads)
 
 Detection unit = H3 res-8 hexes (uniform, ~170 over DC, tiles the city, finer
 than DC's 46 neighborhood clusters), each labeled with the *nearest* single DC
@@ -199,11 +200,20 @@ def abatement(counts, resolved, expected):
     return best
 
 
-# ----------------------------- main ----------------------------------------
-def main():
-    rows = list(csv.DictReader((RAW / f"{C.SIGNAL_KEY}_reports.csv").open()))
-    print(f"Loaded {len(rows):,} reports")
-    name_pts = load_name_points()
+# ----------------------------- per-signal build ----------------------------
+def build_signal(sig, name_pts):
+    """Build agg/<key>_alerts.json for one signal. Returns a manifest entry, or
+    None if the signal has no fetched reports yet."""
+    key, label = sig["key"], sig["label"]
+    src = RAW / f"{key}_reports.csv"
+    if not src.exists():
+        print(f"[{key}] no {src.name} — skipping (run fetch.py first)")
+        return None
+    rows = list(csv.DictReader(src.open()))
+    print(f"[{key}] loaded {len(rows):,} reports")
+    if not rows:
+        print(f"[{key}] empty — skipping")
+        return None
 
     hex_week = defaultdict(lambda: defaultdict(int))   # reports opened / week
     hex_res = defaultdict(lambda: defaultdict(int))    # tickets closed / week
@@ -243,13 +253,17 @@ def main():
             heat_center[h9] = (round(hlat, 5), round(hlon, 5))
         heat_week[h9][wk] += 1
 
+    if min_wk is None:
+        print(f"[{key}] no in-DC points — skipping")
+        return None
+
     weeks = []
     w = min_wk
     while w <= max_wk:
         weeks.append(w)
         w += timedelta(days=7)
     widx = {w: i for i, w in enumerate(weeks)}
-    print(f"{len(weeks)} weeks, {min_wk} .. {max_wk}; {len(hex_center)} hexes, "
+    print(f"[{key}] {len(weeks)} weeks, {min_wk} .. {max_wk}; {len(hex_center)} hexes, "
           f"{len(heat_center)} heat cells")
 
     def series_for(week_map):
@@ -262,7 +276,7 @@ def main():
     # auxiliary corroborating signals (e.g. dead-animal pickups): weekly counts
     # per hex + citywide, bucketed into the SAME res-8 grid. Overlaid, not detected.
     aux_hex, aux_city, aux_meta = {}, {}, []
-    for a in getattr(C, "AUX_SIGNALS", []):
+    for a in sig.get("aux", []):
         path = RAW / f"{a['key']}_reports.csv"
         if not path.exists():
             continue
@@ -341,11 +355,11 @@ def main():
             heat.append({"c": [ctr[0], ctr[1]], "counts": c})
 
     out = {
-        "signal": C.SIGNAL_KEY, "signal_label": C.SIGNAL_LABEL,
+        "signal": key, "signal_label": label,
         "detect_res": C.H3_RES, "heat_res": C.HEAT_RES,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "data_through": weeks[-1].isoformat() if weeks else None,
-        "generated_from": {"start_year": C.START_YEAR, "service_code": C.SERVICE_CODE},
+        "generated_from": {"start_year": C.START_YEAR, "where": C.signal_where(sig)},
         "week_start": [w.isoformat() for w in weeks],
         "detector": {"alert_z": C.ALERT_Z, "persist_z": C.PERSIST_Z,
                      "persist_weeks": C.PERSIST_WEEKS},
@@ -356,13 +370,31 @@ def main():
         "units": units,
         "heat": heat,
     }
-    dest = AGG / f"{C.SIGNAL_KEY}_alerts.json"
+    dest = AGG / f"{key}_alerts.json"
     dest.write_text(json.dumps(out, separators=(",", ":")))
     total_eps = sum(len(u["episodes"]) for u in units)
-    print(f"Wrote {dest}  ({dest.stat().st_size/1024:.0f} KB)")
-    print(f"  {len(units)} hex units, {len(heat)} heat cells, "
-          f"{total_eps} spike episodes")
-    print(f"  citywide abatement: {city_abate}")
+    print(f"[{key}] wrote {dest.name}  ({dest.stat().st_size/1024:.0f} KB) — "
+          f"{len(units)} hex units, {len(heat)} heat cells, {total_eps} episodes")
+    return {
+        "key": key, "label": label, "file": f"agg/{key}_alerts.json",
+        "data_through": out["data_through"], "total": sum(city_counts),
+        "units": len(units),
+    }
+
+
+# ----------------------------- main ----------------------------------------
+def main():
+    name_pts = load_name_points()
+    manifest = []
+    for sig in C.SIGNALS:
+        entry = build_signal(sig, name_pts)
+        if entry:
+            manifest.append(entry)
+    (AGG / "signals.json").write_text(json.dumps(
+        {"generated_at": datetime.now(timezone.utc).isoformat(), "signals": manifest},
+        separators=(",", ":")))
+    print(f"Wrote agg/signals.json — {len(manifest)} signal(s): "
+          f"{', '.join(m['key'] for m in manifest)}")
 
 
 if __name__ == "__main__":
