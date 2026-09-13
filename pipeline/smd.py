@@ -31,7 +31,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import shapely
-from shapely.geometry import Point, shape
+from shapely.geometry import Point, mapping, shape
 
 import config as C
 
@@ -53,6 +53,14 @@ TOP_TYPES = 20          # top service categories kept; rest -> "Other"
 # be trusted).
 CURRENT_YEAR_MAX_AGE_DAYS = 20
 MANIFEST = RAW / "smd_fetch_manifest.json"
+
+# The raw 2023 SMD boundaries are ~4 MB — far too heavy to ship to the browser for
+# the choropleth (DCD3). Simplify each polygon and drop coordinate precision to get
+# a Pages-safe asset (agg/smd_boundaries.min.geojson, a few hundred KB). Tolerance
+# is in degrees (~0.0001 deg ≈ 11 m); 5-decimal coords ≈ 1 m — plenty for a
+# city-wide choropleth.
+BOUNDARY_SIMPLIFY_TOL = 0.0001
+BOUNDARY_COORD_PRECISION = 5
 
 # csv default field-size limit is too small for the occasional long attribute
 csv.field_size_limit(10 * 1024 * 1024)
@@ -96,6 +104,40 @@ def load_manifest():
 
 def save_manifest(m):
     MANIFEST.write_text(json.dumps(m, indent=2, sort_keys=True))
+
+
+def _round_coords(obj, nd):
+    """Recursively round a GeoJSON coordinate array to nd decimals."""
+    if isinstance(obj, (list, tuple)):
+        if obj and isinstance(obj[0], (int, float)):
+            return [round(c, nd) for c in obj]
+        return [_round_coords(x, nd) for x in obj]
+    return obj
+
+
+def write_min_boundaries():
+    """Simplified, low-precision SMD polygons for the client choropleth (DCD3).
+
+    Reads the cached raw boundaries (ensured present by load_smd_polygons),
+    shapely-simplifies each polygon and rounds coordinates, and writes a compact
+    agg/smd_boundaries.min.geojson (props: id, name) small enough to fetch on a
+    static Pages site. Idempotent; boundaries are static (2023) so this is cheap."""
+    gj = json.loads((RAW / "smd_boundaries.geojson").read_text())
+    feats = []
+    for f in gj["features"]:
+        g = shape(f["geometry"]).simplify(BOUNDARY_SIMPLIFY_TOL, preserve_topology=True)
+        geom = mapping(g)
+        geom["coordinates"] = _round_coords(geom["coordinates"], BOUNDARY_COORD_PRECISION)
+        p = f["properties"]
+        feats.append({"type": "Feature",
+                      "properties": {"id": p["SMD_ID"], "name": p.get("NAME") or p["SMD_ID"]},
+                      "geometry": geom})
+    dest = ROOT / "agg" / "smd_boundaries.min.geojson"
+    dest.parent.mkdir(exist_ok=True)
+    dest.write_text(json.dumps({"type": "FeatureCollection", "features": feats},
+                               separators=(",", ":")))
+    print(f"Wrote {dest} · {dest.stat().st_size/1024:.0f} KB · {len(feats)} SMD polygons",
+          file=sys.stderr)
 
 
 def load_smd_polygons():
@@ -220,6 +262,7 @@ def main():
 
     smd_ids, geoms, tree, labels, source_meta = load_smd_polygons()
     n_smd = len(smd_ids)
+    write_min_boundaries()  # compact polygons for the client choropleth (DCD3)
 
     # fetch only the years that need it — parallel (network-bound; each writes its
     # own CSV, so threads never touch shared state). Manifest updated once, after.
