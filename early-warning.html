@@ -158,7 +158,7 @@
     <span class="sighint">same seasonal-anomaly engine, re-pointed at any 311 service type</span>
   </div>
   <h1 id="pageTitle">Where are the rats — is reporting working, and where could we get ahead?</h1>
-  <p class="lede" id="lede">Live read on DC rat reports: where it's <strong>hot right now</strong>, what's <strong>trending up</strong>, which recent surges we <strong>could have caught early</strong>, and whether <strong>abatement is actually driving reports down</strong>. Detection runs per hex, labeled by neighborhood, scored causally so "should-have-known" dates are honest.</p>
+  <p class="lede" id="lede">Live read on DC rat reports: where it's <strong>hot right now</strong>, what's <strong>trending up</strong>, which recent surges we <strong>could have caught early</strong>, and whether <strong>abatement is actually driving reports down</strong>. Detection runs per ANC Single Member District, labeled by neighborhood, scored causally so "should-have-known" dates are honest.</p>
   <p class="asof" id="asof">—</p>
 
   <!-- IMPACT STRIP: does reporting work? -->
@@ -220,7 +220,7 @@
     </div>
     <div class="steps">
       <div class="step"><span class="num">01</span><h3>Ingest</h3><p>Every geolocated report for the selected signal <em>and</em> its ticket-closure date, straight from DC's live 311 API, back to 2018.</p><span class="code" id="ingestCode">DC Open Data · S0311</span></div>
-      <div class="step"><span class="num">02</span><h3>Locate</h3><p>Each report snapped to an H3 hexagon and labeled with its nearest single DC neighborhood — fine, uniform, no merged clusters.</p><span class="code">res-8 hex · 132 nbhd names</span></div>
+      <div class="step"><span class="num">02</span><h3>Locate</h3><p>Each report assigned to its ANC Single Member District by point-in-polygon, then labeled with its nearest single DC neighborhood so a hotspot reads as a real place.</p><span class="code">~345 SMDs · point-in-polygon</span></div>
       <div class="step"><span class="num">03</span><h3>Seasonal baseline</h3><p>Expected count = the same week-of-year in <em>prior</em> years. Kills the "everything spikes in July" false alarm.</p><span class="code">±3-week window</span></div>
       <div class="step"><span class="num">04</span><h3>Trend correction</h3><p>A trailing multiplier tracks each area's current trajectory, so a decade of growth isn't a permanent alarm.</p><span class="code">adaptive level</span></div>
       <div class="step"><span class="num">05</span><h3>Causal scan</h3><p>Week <em>t</em> uses only data before <em>t</em>. Fire on an overdispersed-Poisson exceedance or a sustained warm run, then measure lead time to the peak.</p><span class="code">z ≥ 3.5 · no look-ahead</span></div>
@@ -228,9 +228,9 @@
     </div>
     <div class="statband" id="statband"></div>
     <p class="stack"><b style="color:var(--ink-2)">Built with</b>
-      <span class="pill">Python</span><span class="pill">H3 hex grid</span><span class="pill">NumPy</span>
+      <span class="pill">Python</span><span class="pill">ANC SMD polygons</span><span class="pill">Shapely PIP</span><span class="pill">NumPy</span>
       <span class="pill">Leaflet + heat</span><span class="pill">Chart.js</span><span class="pill">DC Open Data API</span></p>
-    <p class="fine">Detection at H3 res <span id="resLab">8</span> labeled by nearest neighborhood; heatmap at res <span id="heatResLab">9</span>. One script re-points the engine at any 311 service code. Response effects are observational — suggestive, not proof. Aggregate DC public-records data; not an official city agency signal.</p>
+    <p class="fine">Detection per ANC Single Member District (<span id="resLab">345</span> active) labeled by nearest neighborhood; heatmap at H3 res <span id="heatResLab">9</span>. One script re-points the engine at any 311 service code. Response effects are observational — suggestive, not proof. Aggregate DC public-records data; not an official city agency signal.</p>
   </section>
 </div>
 
@@ -250,9 +250,19 @@ function pearson(a,b){const n=Math.min(a.length,b.length);let sa=0,sb=0;
 
 /* ---------- signal picker (DCD6): one engine, many 311 service types ---------- */
 const SIGNAL_FILES={};
+// Shared ANC-SMD boundary polygons (same file the SMD choropleth uses). Fetched
+// once and joined to each signal's per-SMD unit data by id, so the alerts JSON
+// carries no geometry. Cached as {smd_id: geojson feature}.
+let _smdGeoP=null;
+function ensureSMDGeo(){
+  if(!_smdGeoP) _smdGeoP=fetch('agg/smd_boundaries.min.geojson').then(r=>r.json())
+    .then(gj=>{A.smdFeat={};(gj.features||[]).forEach(f=>A.smdFeat[f.properties.id]=f);return A.smdFeat;});
+  return _smdGeoP;
+}
 function loadSignal(key){
   const url=SIGNAL_FILES[key]||('agg/'+key+'_alerts.json');
-  return fetch(url).then(r=>r.json()).then(data=>{A.signalKey=key;init(data);})
+  return Promise.all([ensureSMDGeo(), fetch(url).then(r=>r.json())])
+    .then(([_g,data])=>{A.signalKey=key;init(data);})
     .catch(err=>console.error('failed to load signal',key,err));
 }
 function setActiveTab(key){
@@ -269,7 +279,7 @@ fetch('agg/signals.json').then(r=>r.ok?r.json():Promise.reject('no manifest')).t
   } else { loadSignal('rodent'); }
 }).catch(()=>{ // no manifest yet -> single-signal fallback, hide the (empty) picker
   const bar=document.getElementById('sigbar'); if(bar) bar.style.display='none';
-  fetch('agg/rodent_alerts.json').then(r=>r.json()).then(init);
+  loadSignal('rodent');
 });
 
 function init(data){
@@ -287,14 +297,14 @@ function init(data){
     ? 'Where are the rats — is reporting working, and where could we get ahead?'
     : 'Is reporting working — and where could we get ahead of it?';
   document.getElementById('lede').innerHTML=isRodent
-    ? 'Live read on DC rat reports: where it\'s <strong>hot right now</strong>, what\'s <strong>trending up</strong>, which recent surges we <strong>could have caught early</strong>, and whether <strong>abatement is actually driving reports down</strong>. Detection runs per hex, labeled by neighborhood, scored causally so "should-have-known" dates are honest.'
+    ? 'Live read on DC rat reports: where it\'s <strong>hot right now</strong>, what\'s <strong>trending up</strong>, which recent surges we <strong>could have caught early</strong>, and whether <strong>abatement is actually driving reports down</strong>. Detection runs per ANC Single Member District, labeled by neighborhood, scored causally so "should-have-known" dates are honest.'
     : 'Live read on DC <strong>'+A.noun+'</strong> 311 reports: where it\'s <strong>hot right now</strong> vs. each neighborhood\'s seasonal normal, what\'s <strong>trending up</strong>, and which recent surges we <strong>could have caught early</strong>. Same detector as the rat radar, re-pointed at this service type.';
   const ic=document.getElementById('ingestCode');
   if(ic) ic.textContent='DC Open Data · '+((data.generated_from&&data.generated_from.where)||data.signal);
-  document.getElementById('resLab').textContent=data.detect_res;
+  document.getElementById('resLab').textContent=data.n_smd??data.units.length;
   document.getElementById('heatResLab').textContent=data.heat_res;
   document.getElementById('asof').textContent=
-    'Detection unit: H3 hex, labeled by neighborhood · '+data.units.length+' active hexes · data through week of '+dateShort(A.weeks.at(-1));
+    'Detection unit: ANC Single Member District, labeled by neighborhood · '+data.units.length+' active SMDs · data through week of '+dateShort(A.weeks.at(-1));
 
   data.units.forEach(u=>u._m=metrics(u));
   // optional corroborating aux signal (rats: dead-animal pickups). Most signals have none.
@@ -306,7 +316,7 @@ function init(data){
   } else if(cc){ cc.textContent=''; } // clear stale caption when switching to a signal with no aux
   buildImpact(); buildStatband(); buildBoard(); buildMap(); buildUnitSelect(); wireRange();
 
-  // default: hottest-right-now hex
+  // default: hottest-right-now SMD
   const hot=[...data.units].filter(u=>u._m.recent>=8).sort((a,b)=>b._m.hot-a._m.hot);
   selectUnit((hot[0]||data.units[0]).id);
 }
@@ -381,8 +391,8 @@ function buildStatband(){
   const bestLead=leads.length?Math.max(...leads):0;
   const cool=U.filter(u=>u.abatement&&u.abatement.verdict==='cooling').length;
   const stats=[[fmt(reports),'reports analyzed'],[fmt(d.week_start.length),'weekly data points'],
-    [fmt(U.length),'neighborhood hexes'],[fmt(eps),'spike episodes'],
-    [bestLead+' wk','longest early warning'],[cool,'hexes cooled after closures']];
+    [fmt(U.length),'SMDs analyzed'],[fmt(eps),'spike episodes'],
+    [bestLead+' wk','longest early warning'],[cool,'SMDs cooled after closures']];
   document.getElementById('statband').innerHTML=stats.map(([n,l])=>`<div class="s"><b>${n}</b><span>${l}</span></div>`).join('');
 }
 
@@ -398,7 +408,8 @@ function buildMap(){
   A.unitLayer=L.layerGroup(); A.polyOf={};
   const maxEps=Math.max(1,...A.data.units.map(u=>u.episodes.length));
   A.data.units.forEach(u=>{
-    const poly=L.polygon(u.boundary,{weight:1,color:cssv('--line'),fillOpacity:.5});
+    const feat=A.smdFeat&&A.smdFeat[u.id]; if(!feat)return;  // no SMD boundary -> skip
+    const poly=L.geoJSON(feat,{style:{weight:1,color:cssv('--line'),fillOpacity:.5}});
     poly.on('click',()=>selectUnit(u.id));
     poly.on('mouseover',()=>poly.setStyle({weight:2,color:cssv('--accent')}));
     poly.on('mouseout',()=>{if(A.current!==u)poly.setStyle({weight:1,color:cssv('--line')});});
@@ -482,7 +493,7 @@ function selectUnit(id){
   A.current=u; document.getElementById('unitSel').value=id;
   const p=A.polyOf[id]; if(p){p.setStyle({weight:2.5,color:cssv('--accent')});p.bringToFront();}
   document.getElementById('panelTitle').textContent=u.label;
-  document.getElementById('panelSub').textContent=`${u.episodes.length} spike episode(s) since 2018 · one H3 hex`;
+  document.getElementById('panelSub').textContent=`${u.episodes.length} spike episode(s) since 2018 · one ANC SMD`;
   document.getElementById('kNow').textContent=fmt(u._m.recent);
   document.getElementById('kVs').textContent=(u._m.hot>=1?'+':'')+Math.round((u._m.hot-1)*100)+'%';
   document.getElementById('kLead').textContent=u._m.bestLead+'w';
@@ -497,7 +508,7 @@ function renderCorr(u){
   const total=aux.reduce((s,x)=>s+x,0), rc=A.corrCity.toFixed(2);
   const subject=A.isRodent?'rat':A.noun;
   if(total<40){
-    box.innerHTML=`<b>Corroboration.</b> Too few ${name} in this hex to correlate locally — but <span class="rnum">citywide they track ${subject} reports strongly (r=${rc})</span>, an independent read on ${subject} pressure.`;
+    box.innerHTML=`<b>Corroboration.</b> Too few ${name} in this SMD to correlate locally — but <span class="rnum">citywide they track ${subject} reports strongly (r=${rc})</span>, an independent read on ${subject} pressure.`;
     return;
   }
   const r=pearson(rollsum(u.counts,4),rollsum(aux,4));
