@@ -1,144 +1,97 @@
-"""Freshness / sanity guardrail — run AFTER the pipeline, BEFORE committing.
+"""Build sanity-gate — run AFTER the pipeline, BEFORE the Pages deploy.
 
-The whole point of the automated monthly refresh is that it must never quietly
-commit gap-ridden or empty data over good data. DC's ArcGIS endpoint can return
-a truncated or empty response that still "succeeds" (HTTP 200), which would
-otherwise regenerate a smaller-but-valid-looking agg.json and silently wipe out
-real history on the live dashboard.
+Under the artifact-deploy model (DCD7) the built data no longer lives in git, so
+there's no committed HEAD to diff against. Instead this fails the job (non-zero
+exit) if any freshly built artifact is missing, empty, malformed, or implausibly
+small — a degenerate build (truncated/empty ArcGIS pull, a crashed builder) must
+NOT be deployed. On failure the workflow stops here and the last good Pages
+deploy stays live.
 
-So this script compares the freshly regenerated artifacts in the working tree
-against the versions committed at HEAD (the last good refresh) and FAILS the job
-(non-zero exit) if either:
-
-  * the total row/report count dropped sharply (> DROP_FRAC below HEAD), or
-  * the data window went BACKWARD (newest month / week older than HEAD).
-
-A window that merely didn't advance is NOT a failure — DC's data lags and
-backfills, so a monthly run can legitimately land before new data is posted; in
-that case the "commit only when the diff is non-empty" step in the workflow
-means nothing gets committed anyway. We warn about it but don't fail.
-
-Checked artifacts:
-  * agg.json                  (submission-volume dashboard)
-  * agg/rodent_alerts.json    (complaint-radar / early-warning dashboard)
-  * agg/categories.json       (dashboard complaint-category breakdown)
-
-If an artifact has no committed HEAD version yet (first run), its checks are
-skipped — there's nothing to regress against.
+Floors are set well below normal output so they only trip on a genuinely broken
+build, not on normal month-to-month variation.
 
 Run:  python pipeline/guardrail.py
 """
 import json
-import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# A refresh only ever ADDS rows (history is immutable, the current period grows),
-# so any real drop signals a truncated/empty pull. Allow a tiny tolerance.
-DROP_FRAC = 0.95  # fail if new_total < 95% of the committed total
 
-
-def head_json(relpath):
-    """Parse the committed HEAD version of a file, or None if it doesn't exist."""
-    try:
-        blob = subprocess.run(
-            ["git", "show", f"HEAD:{relpath}"],
-            cwd=ROOT, capture_output=True, text=True, check=True,
-        ).stdout
-    except subprocess.CalledProcessError:
-        return None
-    try:
-        return json.loads(blob)
-    except json.JSONDecodeError:
-        return None
-
-
-def working_json(relpath):
+def _load(relpath):
     p = ROOT / relpath
-    return json.loads(p.read_text()) if p.exists() else None
-
-
-def check(name, relpath, total_of, through_of):
-    """Return (errors, warnings) for one artifact."""
-    errs, warns = [], []
-    new = working_json(relpath)
-    old = head_json(relpath)
-    if new is None:
-        errs.append(f"[{name}] working-tree {relpath} is missing or invalid.")
-        return errs, warns
-    if old is None:
-        print(f"[{name}] no committed HEAD version — first run, skipping regression checks.")
-        return errs, warns
-
-    old_total, new_total = total_of(old), total_of(new)
-    old_thru, new_thru = through_of(old), through_of(new)
-    print(f"[{name}] total: {old_total:,} -> {new_total:,} | "
-          f"through: {old_thru} -> {new_thru}")
-
-    if old_total and new_total < DROP_FRAC * old_total:
-        errs.append(f"[{name}] total dropped sharply: {new_total:,} < "
-                    f"{DROP_FRAC:.0%} of {old_total:,} — likely a truncated/empty pull.")
-    if old_thru and new_thru and str(new_thru) < str(old_thru):
-        errs.append(f"[{name}] data window went BACKWARD: {new_thru} < {old_thru}.")
-    elif old_thru and new_thru and str(new_thru) == str(old_thru):
-        warns.append(f"[{name}] data window did not advance (still {new_thru}); "
-                     f"DC data may just be lagging — not fatal.")
-    return errs, warns
-
-
-def agg_total(d):
-    return d.get("bulk_total") or sum(c for _, c in d.get("by_year", []))
-
-
-def agg_through(d):
-    if d.get("data_through"):
-        return d["data_through"]
-    bm = d.get("by_month") or []
-    return bm[-1][0] if bm else None
-
-
-def rodent_total(d):
-    city = d.get("city") or {}
-    return sum(city.get("counts", [])) or sum(u.get("total", 0) for u in d.get("units", []))
-
-
-def rodent_through(d):
-    if d.get("data_through"):
-        return d["data_through"]
-    ws = d.get("week_start") or []
-    return ws[-1] if ws else None
-
-
-def cat_total(d):
-    # every request across every (year, ward, category) in the cube
-    return sum(n for yr in (d.get("citywide") or {}).values() for n in yr.values())
-
-
-def cat_through(d):
-    return d.get("data_through")
+    if not p.exists():
+        return None, 0
+    try:
+        return json.loads(p.read_text()), p.stat().st_size
+    except json.JSONDecodeError:
+        return "MALFORMED", p.stat().st_size
 
 
 def main():
-    errors, warnings = [], []
-    for args in (
-        ("agg.json", "agg.json", agg_total, agg_through),
-        ("rodent_alerts", "agg/rodent_alerts.json", rodent_total, rodent_through),
-        ("categories", "agg/categories.json", cat_total, cat_through),
-    ):
-        e, w = check(*args)
-        errors += e
-        warnings += w
+    errs = []
 
-    for w in warnings:
-        print(f"WARN: {w}")
-    if errors:
-        print("\nGUARDRAIL FAILED — refusing to commit:")
-        for e in errors:
+    def require(cond, msg):
+        if not cond:
+            errs.append(msg)
+
+    # --- submission-volume dashboard ---
+    agg, _ = _load("agg.json")
+    if agg in (None, "MALFORMED"):
+        require(False, f"agg.json missing or malformed ({agg})")
+    else:
+        require((agg.get("bulk_total") or 0) >= 4_000_000,
+                f"agg.json bulk_total too low: {agg.get('bulk_total')}")
+        require(len(agg.get("by_month", [])) > 100,
+                f"agg.json by_month too short: {len(agg.get('by_month', []))}")
+        require(bool(agg.get("data_through")), "agg.json missing data_through")
+
+    # --- Complaint Radar: the rat signal is always present ---
+    rr, _ = _load("agg/rodent_alerts.json")
+    if rr in (None, "MALFORMED"):
+        require(False, f"agg/rodent_alerts.json missing or malformed ({rr})")
+    else:
+        require(len(rr.get("units", [])) >= 50,
+                f"rodent_alerts units too few: {len(rr.get('units', []))}")
+        require(bool(rr.get("week_start")), "rodent_alerts missing week_start")
+
+    # --- radar manifest ---
+    sig, _ = _load("agg/signals.json")
+    require(isinstance(sig, dict) and len(sig.get("signals", [])) >= 1,
+            "agg/signals.json missing or has no signals")
+
+    # --- SMD chart + choropleth ---
+    smd, _ = _load("agg/smd.json")
+    if smd in (None, "MALFORMED"):
+        require(False, f"agg/smd.json missing or malformed ({smd})")
+    else:
+        require(len(smd.get("smds", [])) >= 300,
+                f"smd.json has too few SMDs: {len(smd.get('smds', []))}")
+        require(bool(smd.get("years")), "smd.json missing years")
+        latest = str(smd.get("years", [0])[-1]) if smd.get("years") else None
+        mapped = sum((smd.get("counts", {}).get(latest, {}) or {}).get("__all__", [])) if latest else 0
+        require(mapped > 0, f"smd.json latest-year mapped count is 0 ({latest})")
+    geo, geo_sz = _load("agg/smd_boundaries.min.geojson")
+    require(isinstance(geo, dict) and len(geo.get("features", [])) >= 300,
+            "smd_boundaries.min.geojson missing or too few polygons")
+    require(geo_sz < 1_500_000,
+            f"smd_boundaries.min.geojson too large for Pages: {geo_sz} B (simplify harder)")
+
+    # --- category + anomaly boards (existence + non-empty) ---
+    cat, _ = _load("agg/categories.json")
+    require(isinstance(cat, dict) and bool(cat.get("citywide")),
+            "agg/categories.json missing or empty")
+    anom, _ = _load("agg/anomalies.json")
+    require(isinstance(anom, dict) and "board" in anom,
+            "agg/anomalies.json missing or empty")
+
+    if errs:
+        print("BUILD SANITY FAILED — refusing to deploy:")
+        for e in errs:
             print(f"  ✗ {e}")
         sys.exit(1)
-    print("\nGuardrail passed.")
+    print("Guardrail passed — all built artifacts look sane.")
 
 
 if __name__ == "__main__":

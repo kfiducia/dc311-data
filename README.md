@@ -23,6 +23,8 @@ web, desktop web, native app) and submission-volume trends.
   detections
 - `agg/categories.json` — per-year, per-ward complaint-category cube
 - `agg/anomalies.json` — per-ward month-over-baseline anomaly board
+- `smd.html` + `agg/smd.json` + `agg/smd_boundaries.min.geojson` — per-SMD (ANC
+  Single Member District) ranked chart + choropleth map
 
 Volume figures use the full DC ArcGIS bulk dataset (4.97M requests, 2009–2026).
 Submission-method percentages are from per-request `source`/`origin` lookups
@@ -30,18 +32,21 @@ against DC's live 311 API (sampled). All data is aggregate DC public-records dat
 
 ## Refresh
 
-The dashboards are static: they render committed artifacts (`agg.json`, the
-per-signal `agg/<signal>_alerts.json` + `agg/signals.json` manifest, the
-`agg/categories.json` category cube, and `export_*.csv`), so "refresh the data"
-means re-run the pipeline and commit the regenerated files. GitHub Pages redeploys
-on push. To add or change a radar signal, edit `SIGNALS` in `pipeline/config.py`.
+The dashboards are static, and the machine-generated data (`agg/*.json`,
+`agg/smd_boundaries.min.geojson`, and the volume half of `agg.json`) is **built in
+CI and published as a GitHub Pages artifact — it is not committed to git.** This
+keeps the repo from growing megabytes of regenerated JSON every month. `main` holds
+only source (HTML, `pipeline/`, the method-data seed); the built data lives in the
+deployed artifact. To add or change a radar signal, edit `SIGNALS` in
+`pipeline/config.py`.
 
 ### Automated (monthly)
 
 `.github/workflows/refresh.yml` runs on the **1st of each month** (and via the
 Actions tab's **Run workflow** button). It pulls fresh data straight from DC's
-public ArcGIS API — no credentials needed — regenerates the artifacts, runs a
-freshness guardrail, and commits only if something changed:
+public ArcGIS API — no credentials needed — builds every artifact, sanity-gates
+them, then deploys the whole site straight to Pages (`upload-pages-artifact` +
+`deploy-pages`); nothing is pushed back to `main`:
 
 ```
 python pipeline/fetch.py              # radar: every resolve_signals() service type + aux -> data/raw/
@@ -49,14 +54,30 @@ python pipeline/build.py              # radar aggregates -> agg/<signal>_alerts.
 python pipeline/refresh_submission.py # submission volume (current year) -> agg.json + dashboards
 python pipeline/categories.py         # complaint-category cube -> agg/categories.json
 python pipeline/anomaly.py            # per-ward month-over-baseline board -> agg/anomalies.json
-python pipeline/guardrail.py          # fail if a pull is truncated/empty or the window regressed
+python pipeline/smd.py                # per-SMD counts + simplified boundaries -> agg/smd*.json
+python pipeline/guardrail.py          # fail (=> no deploy, last-good site stays live) if a build is empty/degenerate
 ```
 
 The workflow caches the per-year checkpoint CSVs (`actions/cache` on `data/raw/`)
-and re-pulls only the current, still-growing year each run. `agg.json`,
-`agg/<signal>_alerts.json`, and `agg/categories.json` carry `generated`/
-`generated_at` + `data_through` stamps, surfaced in each dashboard's footer so
-staleness is visible at a glance.
+and re-pulls only the current, still-growing year each run (radar via `fetch.py`,
+SMD via `smd.py`'s fetch manifest). `agg.json`, `agg/<signal>_alerts.json`,
+`agg/categories.json`, and `agg/smd.json` carry `generated`/`generated_at` +
+`data_through` stamps, surfaced in each dashboard's footer so staleness is visible.
+
+**Pages source must be set to "GitHub Actions"** (repo Settings → Pages), not
+"Deploy from branch" — the artifact deploy requires it.
+
+### Local build
+
+Because the data isn't committed, building the site locally means running the
+pipeline first:
+
+```
+cd pipeline && python fetch.py && python build.py && python refresh_submission.py \
+  && python categories.py && python anomaly.py && python smd.py
+python pipeline/guardrail.py
+# then serve the repo root: python -m http.server 8000
+```
 
 ### Manual — submission method/source data
 
