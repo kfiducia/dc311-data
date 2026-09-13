@@ -1,7 +1,11 @@
-"""Pull raw 311 records for the configured signal from DC's ArcGIS API.
+"""Pull raw 311 records for every configured signal from DC's ArcGIS API.
 
-Writes one tidy CSV: data/raw/<signal>_reports.csv  (date_iso, lat, lon, ward)
-Paginates each per-year layer at 1000 rows/request. Idempotent: safe to rerun.
+Writes one tidy CSV per signal: data/raw/<key>_reports.csv (date, lat, lon,
+ward, resolved). Paginates each per-year layer at 1000 rows/request. Idempotent:
+per-year checkpoints (`_<key>_<year>.csv`) mean a rerun skips cached years.
+
+Signals (and their aux signals) come from config.SIGNALS — each contributes its
+own WHERE clause (a code list or an explicit `where`, e.g. every DMV* code).
 """
 import csv
 import json
@@ -44,9 +48,8 @@ def year_layers():
     return out
 
 
-def fetch_year(layer_id, year, service_code):
+def fetch_year(layer_id, year, where):
     rows, offset = [], 0
-    where = f"SERVICECODE='{service_code}'"
     while True:
         data = _get(
             f"{C.ARCGIS_SERVICE}/{layer_id}/query",
@@ -81,16 +84,16 @@ def fetch_year(layer_id, year, service_code):
     return rows
 
 
-def fetch_signal(key, service_code, layers, years):
-    """Fetch one service code across all years -> data/raw/<key>_reports.csv.
+def fetch_signal(key, where, layers, years):
+    """Fetch one signal's WHERE across all years -> data/raw/<key>_reports.csv.
     Checkpoints each year so a stall never loses prior work; reruns skip cached."""
-    print(f"Fetching {key} ({service_code}) for years {years[0]}-{years[-1]}")
+    print(f"Fetching {key}  [{where}]  for years {years[0]}-{years[-1]}")
     for y in years:
         part = RAW / f"_{key}_{y}.csv"
         if part.exists():
             print(f"  {y}: cached", file=sys.stderr)
             continue
-        rows = fetch_year(layers[y], y, service_code)
+        rows = fetch_year(layers[y], y, where)
         with part.open("w", newline="") as fh:
             csv.writer(fh).writerows(rows)
         print(f"  {y}: wrote {len(rows):,}", file=sys.stderr)
@@ -107,13 +110,20 @@ def fetch_signal(key, service_code, layers, years):
     print(f"Wrote {len(all_rows):,} rows -> {out}")
 
 
+def iter_signals():
+    """Every fetchable (key, where) pair: each detect signal plus its aux signals.
+    Signal set is resolved live (rats + top-N categories by volume)."""
+    for sig in C.resolve_signals():
+        yield sig["key"], C.signal_where(sig)
+        for a in sig.get("aux", []):
+            yield a["key"], C.signal_where(a)
+
+
 def main():
     layers = year_layers()
     years = sorted(y for y in layers if y >= C.START_YEAR)
-    signals = [(C.SIGNAL_KEY, C.SERVICE_CODE)] + \
-        [(a["key"], a["service_code"]) for a in getattr(C, "AUX_SIGNALS", [])]
-    for key, code in signals:
-        fetch_signal(key, code, layers, years)
+    for key, where in iter_signals():
+        fetch_signal(key, where, layers, years)
 
 
 if __name__ == "__main__":

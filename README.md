@@ -5,10 +5,24 @@ web, desktop web, native app) and submission-volume trends.
 
 **Live dashboard:** https://kfiducia.github.io/dc311-data/
 
-- `dashboard.html` — interactive charts (year selector: 2024 / 2026 / combined)
+- `dashboard.html` — submission methods + volume, plus two segmentation views
+  drawn from CityCast's neighborhood-311 analysis: a complaint-**category**
+  breakdown by ward (top types, with the ever-present trash/parking/info
+  categories toggle-able), and a per-ward **anomaly board** — for the latest
+  complete month, which category is running most above that ward's own
+  same-month-in-prior-years normal (the reporter's method, run over every
+  category)
+- `early-warning.html` — **Complaint Radar**: one seasonal-anomaly detector,
+  selectable across signals **chosen data-driven** — rats (special, with a
+  dead-animal overlay) plus the top-N categories by volume, minus the ubiquitous
+  ones (`config.resolve_signals`, `RADAR_TOP_N`)
 - `submission_methods.md` — written findings
 - `export_*.csv` — underlying aggregate tables
-- `agg.json` — all aggregated data behind the dashboard
+- `agg.json` — aggregated volume/method data behind the dashboard
+- `agg/signals.json` + `agg/<signal>_alerts.json` — radar manifest + per-signal
+  detections
+- `agg/categories.json` — per-year, per-ward complaint-category cube
+- `agg/anomalies.json` — per-ward month-over-baseline anomaly board
 
 Volume figures use the full DC ArcGIS bulk dataset (4.97M requests, 2009–2026).
 Submission-method percentages are from per-request `source`/`origin` lookups
@@ -16,9 +30,11 @@ against DC's live 311 API (sampled). All data is aggregate DC public-records dat
 
 ## Refresh
 
-The dashboards are static: they render committed artifacts (`agg.json`,
-`agg/rodent_alerts.json`, `export_*.csv`), so "refresh the data" means re-run the
-pipeline and commit the regenerated files. GitHub Pages redeploys on push.
+The dashboards are static: they render committed artifacts (`agg.json`, the
+per-signal `agg/<signal>_alerts.json` + `agg/signals.json` manifest, the
+`agg/categories.json` category cube, and `export_*.csv`), so "refresh the data"
+means re-run the pipeline and commit the regenerated files. GitHub Pages redeploys
+on push. To add or change a radar signal, edit `SIGNALS` in `pipeline/config.py`.
 
 ### Automated (monthly)
 
@@ -28,16 +44,19 @@ public ArcGIS API — no credentials needed — regenerates the artifacts, runs 
 freshness guardrail, and commits only if something changed:
 
 ```
-python pipeline/fetch.py              # rat-radar: rodent + dead-animal reports -> data/raw/
-python pipeline/build.py              # rat-radar aggregates -> agg/rodent_alerts.json
+python pipeline/fetch.py              # radar: every resolve_signals() service type + aux -> data/raw/
+python pipeline/build.py              # radar aggregates -> agg/<signal>_alerts.json + signals.json
 python pipeline/refresh_submission.py # submission volume (current year) -> agg.json + dashboards
-python pipeline/guardrail.py          # fail if the pull is truncated/empty or the window regressed
+python pipeline/categories.py         # complaint-category cube -> agg/categories.json
+python pipeline/anomaly.py            # per-ward month-over-baseline board -> agg/anomalies.json
+python pipeline/guardrail.py          # fail if a pull is truncated/empty or the window regressed
 ```
 
 The workflow caches the per-year checkpoint CSVs (`actions/cache` on `data/raw/`)
-and re-pulls only the current, still-growing year each run. `agg.json` and
-`agg/rodent_alerts.json` carry `generated`/`generated_at` + `data_through` stamps,
-surfaced in each dashboard's footer so staleness is visible at a glance.
+and re-pulls only the current, still-growing year each run. `agg.json`,
+`agg/<signal>_alerts.json`, and `agg/categories.json` carry `generated`/
+`generated_at` + `data_through` stamps, surfaced in each dashboard's footer so
+staleness is visible at a glance.
 
 ### Manual — submission method/source data
 

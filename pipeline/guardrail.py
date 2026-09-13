@@ -20,7 +20,8 @@ means nothing gets committed anyway. We warn about it but don't fail.
 
 Checked artifacts:
   * agg.json                  (submission-volume dashboard)
-  * agg/rodent_alerts.json    (rat-radar / early-warning dashboard)
+  * agg/rodent_alerts.json    (complaint-radar / early-warning dashboard)
+  * agg/categories.json       (dashboard complaint-category breakdown)
 
 If an artifact has no committed HEAD version yet (first run), its checks are
 skipped — there's nothing to regress against.
@@ -110,11 +111,21 @@ def rodent_through(d):
     return ws[-1] if ws else None
 
 
+def cat_total(d):
+    # every request across every (year, ward, category) in the cube
+    return sum(n for yr in (d.get("citywide") or {}).values() for n in yr.values())
+
+
+def cat_through(d):
+    return d.get("data_through")
+
+
 def main():
     errors, warnings = [], []
     for args in (
         ("agg.json", "agg.json", agg_total, agg_through),
         ("rodent_alerts", "agg/rodent_alerts.json", rodent_total, rodent_through),
+        ("categories", "agg/categories.json", cat_total, cat_through),
     ):
         e, w = check(*args)
         errors += e
