@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 .DS_Store
+.playwright-mcp/
 # DCD8/DCD10: the raw 311 data lives in git so CI only ever fetches the CURRENT
 # year (never re-pulling ~20 years each run). We track the unified per-year
 # checkpoints (_all_<year>.csv — all records, all fields), the change-token
