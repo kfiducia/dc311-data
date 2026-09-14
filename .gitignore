@@ -2,10 +2,11 @@
 __pycache__/
 .DS_Store
 .playwright-mcp/
-# DCD8: the raw 311 data now lives in git so CI only ever fetches the CURRENT
-# year (never re-pulling ~20 years each run). We track the immutable per-year
-# checkpoints (_<signal>_<year>.csv, _smd_pts_<year>.csv), the SMD boundaries
-# and the fetch manifest. The combined per-signal reports CSVs are DERIVED from
-# the checkpoints (regenerated every run by fetch.py), so they stay ignored to
-# avoid needless churn.
+# DCD8/DCD10: the raw 311 data lives in git so CI only ever fetches the CURRENT
+# year (never re-pulling ~20 years each run). We track the unified per-year
+# checkpoints (_all_<year>.csv — all records, all fields), the change-token
+# (source_counts.json), the SMD boundaries and the neighborhood label points.
+# The old per-signal combined reports CSVs are derived/legacy, so stay ignored.
 data/raw/*_reports.csv
+# in-progress fetch pages (resumable); only the atomically-renamed final is tracked
+data/raw/*.part

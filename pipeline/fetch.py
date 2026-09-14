@@ -1,11 +1,23 @@
-"""Pull raw 311 records for every configured signal from DC's ArcGIS API.
+"""Pull ALL raw DC 311 records once per year from ArcGIS -> data/raw/_all_<year>.csv.
 
-Writes one tidy CSV per signal: data/raw/<key>_reports.csv (date, lat, lon,
-ward, resolved). Paginates each per-year layer at 1000 rows/request. Idempotent:
-per-year checkpoints (`_<key>_<year>.csv`) mean a rerun skips cached years.
+One row per request:  date, resolved, lat, lon, ward, code, service, agency
+  (ADDDATE, RESOLUTIONDATE, LATITUDE, LONGITUDE, WARD, SERVICECODE,
+   SERVICECODEDESCRIPTION, SERVICETYPECODEDESCRIPTION)
 
-Signals (and their aux signals) come from config.SIGNALS — each contributes its
-own WHERE clause (a code list or an explicit `where`, e.g. every DMV* code).
+This single raw source feeds everything downstream (DCD10): build.py's radar
+filters it by SERVICECODE; smd.py's choropleth point-in-polygons the rows and
+groups by the granular SERVICECODEDESCRIPTION. It replaces the old per-signal
+`_<key>_<year>.csv` fetches and smd.py's separate all-points pull — the full
+dataset was being pulled once for SMD *plus* filtered subsets ~9 more times.
+Rows missing lat/lon are KEPT (empty coords) so SMD's no-latlon bucket is honest;
+rows missing a date are skipped (can't place them in time).
+
+Committed to git (DCD8), so CI only ever fetches the CURRENT year: a year is
+re-fetched only if its source record count changed (a backfill) — plus always the
+current year, whose closures fill in without changing the count. An unknown count
+trusts the committed checkpoint, so a fresh clone never re-pulls history. Change
+token: data/raw/source_counts.json (per-year returnCountOnly — this MapServer has
+no reliable lastEditDate/ETag).
 """
 import csv
 import json
@@ -13,6 +25,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,12 +34,16 @@ import config as C
 RAW = Path(__file__).resolve().parent.parent / "data" / "raw"
 RAW.mkdir(parents=True, exist_ok=True)
 
-# DCD8: per-year source record counts are our change token. This MapServer
-# exposes no lastEditDate/editingInfo and its ETags aren't stable, but a
-# returnCountOnly query per year is cheap and reliable. We store the last-seen
-# count per year and only re-fetch a year whose count changed (a backfill) — plus
-# always the current year, whose closures fill in without changing the count.
-COUNTS = RAW / "radar_year_counts.json"
+# Per-year source record counts = the change token (see module docstring).
+COUNTS = RAW / "source_counts.json"
+
+# Floor at the SMD choropleth's start year (2016 — modern years are clean); the
+# radar applies its own, later C.START_YEAR when it reads these files.
+FETCH_START_YEAR = 2016
+
+_FIELDS = ("ADDDATE,RESOLUTIONDATE,LATITUDE,LONGITUDE,WARD,"
+           "SERVICECODE,SERVICECODEDESCRIPTION,SERVICETYPECODEDESCRIPTION")
+HEADER = ["date", "resolved", "lat", "lon", "ward", "code", "service", "agency"]
 
 
 def _get(url, params):
@@ -77,9 +94,9 @@ def load_counts():
 def changed_years(layers, years):
     """Years to (re)fetch: the current year always, plus any prior year whose
     source count *changed* since we last stored it (a backfill). A prior year we
-    have no stored count for is TRUSTED (we reuse its committed checkpoint and
-    just record the count) — so a fresh clone never re-pulls all of history.
-    Returns (set_of_years, live_counts) so main can persist the fresh counts."""
+    have no stored count for is TRUSTED (reuse its committed checkpoint, just
+    record the count) — so a fresh clone never re-pulls all of history. Returns
+    (set_of_years, live_counts) so main can persist the fresh counts."""
     live = year_counts(layers, years)
     stored = load_counts()
     current = max(years)
@@ -91,89 +108,101 @@ def changed_years(layers, years):
     return changed, live
 
 
-def fetch_year(layer_id, year, where):
-    rows, offset = [], 0
-    while True:
-        data = _get(
-            f"{C.ARCGIS_SERVICE}/{layer_id}/query",
-            {
-                "where": where,
-                "outFields": "ADDDATE,RESOLUTIONDATE,LATITUDE,LONGITUDE,WARD",
-                "returnGeometry": "false",
-                "resultOffset": offset,
-                "resultRecordCount": 1000,
-                "orderByFields": "ADDDATE",
-                "f": "json",
-            },
-        )
-        feats = data.get("features", [])
-        if not feats:
-            break
-        for f in feats:
-            a = f["attributes"]
-            ms, lat, lon = a.get("ADDDATE"), a.get("LATITUDE"), a.get("LONGITUDE")
-            if ms is None or lat is None or lon is None:
-                continue
-            d = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).date()
-            rms = a.get("RESOLUTIONDATE")
-            resolved = (datetime.fromtimestamp(rms / 1000, tz=timezone.utc).date()
-                        .isoformat() if rms else "")
-            rows.append((d.isoformat(), f"{lat:.6f}", f"{lon:.6f}",
-                         a.get("WARD") or "", resolved))
-        offset += len(feats)
-        print(f"  {year}: {offset} rows", file=sys.stderr)
-        if len(feats) < 1000:
-            break
-    return rows
+PAGE = 1000  # ArcGIS max rows per query
 
 
-def fetch_signal(key, where, layers, years, refetch):
-    """Fetch one signal's WHERE across all years -> data/raw/<key>_reports.csv.
-    Checkpoints each year (committed to git, DCD8). A year is (re)fetched only if
-    its checkpoint is missing or the year is in `refetch` (current year or a
-    backfilled prior year); otherwise the committed checkpoint is reused as-is."""
-    print(f"Fetching {key}  [{where}]  for years {years[0]}-{years[-1]}")
-    for y in years:
-        part = RAW / f"_{key}_{y}.csv"
-        if part.exists() and y not in refetch:
-            print(f"  {y}: reuse committed checkpoint (unchanged)", file=sys.stderr)
-            continue
-        rows = fetch_year(layers[y], y, where)
+def _row(a):
+    """One ArcGIS attribute dict -> a CSV row in HEADER order. Rows with no date or
+    no lat/lon are KEPT (empty fields) so the file's row count == the layer count
+    (our change token) and SMD's no-latlon bucket stays honest; build.py skips the
+    dateless ones at read time."""
+    ms = a.get("ADDDATE")
+    d = (datetime.fromtimestamp(ms / 1000, tz=timezone.utc).date().isoformat()
+         if ms else "")
+    rms = a.get("RESOLUTIONDATE")
+    resolved = (datetime.fromtimestamp(rms / 1000, tz=timezone.utc).date().isoformat()
+                if rms else "")
+    lat, lon = a.get("LATITUDE"), a.get("LONGITUDE")
+    return (d, resolved,
+            f"{lat:.6f}" if lat is not None else "",
+            f"{lon:.6f}" if lon is not None else "",
+            a.get("WARD") or "",
+            (a.get("SERVICECODE") or "").strip(),
+            (a.get("SERVICECODEDESCRIPTION") or "").strip(),
+            (a.get("SERVICETYPECODEDESCRIPTION") or "").strip())
+
+
+def fetch_year_all(layer_id, year):
+    """Stream one year's FULL request set to data/raw/_all_<year>.csv, **paging to
+    disk** so a kill mid-year resumes from the last complete page instead of losing
+    the year. Writes to a `.part` file (appended per page) and atomically renames to
+    the final name on completion — so a present final file means "already done", and
+    a present `.part` means "resume here". Deterministic `orderByFields=ADDDATE`
+    makes offset-based resume safe."""
+    final = RAW / f"_all_{year}.csv"
+    if final.exists():
+        print(f"  {year}: already complete", file=sys.stderr)
+        return
+    part = RAW / f"_all_{year}.csv.part"
+    offset = 0
+    if part.exists():
+        # resume at the last CLEAN page boundary; drop any partial tail page
+        with part.open() as fh:
+            lines = fh.readlines()
+        offset = (max(0, len(lines) - 1) // PAGE) * PAGE  # -1 for header
+        with part.open("w") as fh:
+            fh.writelines(lines[:offset + 1])             # header + offset rows
+        print(f"  {year}: resuming at offset {offset:,}", file=sys.stderr)
+    else:
         with part.open("w", newline="") as fh:
-            csv.writer(fh).writerows(rows)
-        print(f"  {y}: wrote {len(rows):,}", file=sys.stderr)
-
-    all_rows = []
-    for y in years:
-        all_rows += list(csv.reader((RAW / f"_{key}_{y}.csv").open()))
-    all_rows.sort()
-    out = RAW / f"{key}_reports.csv"
-    with out.open("w", newline="") as fh:
+            csv.writer(fh).writerow(HEADER)
+    with part.open("a", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(["date", "lat", "lon", "ward", "resolved"])
-        w.writerows(all_rows)
-    print(f"Wrote {len(all_rows):,} rows -> {out}")
-
-
-def iter_signals():
-    """Every fetchable (key, where) pair: each detect signal plus its aux signals.
-    Signal set is resolved live (rats + top-N categories by volume)."""
-    for sig in C.resolve_signals():
-        yield sig["key"], C.signal_where(sig)
-        for a in sig.get("aux", []):
-            yield a["key"], C.signal_where(a)
+        while True:
+            data = _get(
+                f"{C.ARCGIS_SERVICE}/{layer_id}/query",
+                {"where": "1=1", "outFields": _FIELDS, "returnGeometry": "false",
+                 "resultOffset": offset, "resultRecordCount": PAGE,
+                 "orderByFields": "ADDDATE", "f": "json"},
+            )
+            feats = data.get("features", [])
+            if not feats:
+                break
+            w.writerows(_row(f["attributes"]) for f in feats)
+            fh.flush()
+            offset += len(feats)
+            if offset % 20000 == 0:
+                print(f"  {year}: {offset:,} rows", file=sys.stderr)
+            if len(feats) < PAGE:
+                break
+    part.replace(final)  # atomic: mark the year complete
+    print(f"  {year}: complete ({offset:,} rows)", file=sys.stderr)
 
 
 def main():
     layers = year_layers()
-    years = sorted(y for y in layers if y >= C.START_YEAR)
+    years = sorted(y for y in layers if y >= FETCH_START_YEAR)
     refetch, live = changed_years(layers, years)
-    reused = [y for y in years if y not in refetch]
-    print(f"Radar fetch: (re)fetch={sorted(refetch)} · reuse committed={reused or '—'}")
-    for key, where in iter_signals():
-        fetch_signal(key, where, layers, years, refetch)
+    # Force a fresh pull for years that changed / the current year: drop their final
+    # (and any stale .part) so fetch_year_all re-pulls from scratch rather than
+    # short-circuiting on the existing final. Missing/partial years are left as-is
+    # so fetch_year_all resumes their .part from the last complete page.
+    for y in refetch:
+        (RAW / f"_all_{y}.csv").unlink(missing_ok=True)
+        (RAW / f"_all_{y}.csv.part").unlink(missing_ok=True)
+    todo = [y for y in years if not (RAW / f"_all_{y}.csv").exists()]
+    reused = [y for y in years if y not in todo]
+    print(f"Fetch ALL 311 records: (re)fetch={sorted(todo) or '—'} · "
+          f"reuse committed={reused or '—'}")
+    # Parallel across years (network-bound; each thread streams its own file, so
+    # there's no shared mutable state). CI normally only has the current year to do.
+    if todo:
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            list(ex.map(lambda y: fetch_year_all(layers[y], y), todo))
     # Persist the fresh per-year counts so the next run can detect changes.
-    COUNTS.write_text(json.dumps({str(y): live[y] for y in years}, indent=2, sort_keys=True))
+    COUNTS.write_text(json.dumps({str(y): live[y] for y in years},
+                                 indent=2, sort_keys=True))
+    print(f"Wrote {COUNTS.name} for years {years[0]}-{years[-1]}")
 
 
 if __name__ == "__main__":

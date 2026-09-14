@@ -1,6 +1,7 @@
 """Turn raw reports into hex weekly series + causal spike alerts + abatement.
 
-Reads   data/raw/<signal>_reports.csv   (date, lat, lon, ward, resolved)
+Reads   data/raw/_all_<year>.csv         (unified all-records source, DCD10),
+        filtered by SERVICECODE per signal (config.resolve_signals)
 Writes  agg/<signal>_alerts.json         (one per config.SIGNALS entry)
         agg/signals.json                 (manifest the dashboard's picker reads)
 
@@ -204,16 +205,14 @@ def abatement(counts, resolved, expected):
 
 
 # ----------------------------- per-signal build ----------------------------
-def build_signal(sig, smd_ctx):
-    """Build agg/<key>_alerts.json for one signal. Returns a manifest entry, or
-    None if the signal has no fetched reports yet."""
+def build_signal(sig, smd_ctx, by_code):
+    """Build agg/<key>_alerts.json for one signal. `by_code` maps SERVICECODE ->
+    list of report rows (from the unified data/raw/_all_<year>.csv, DCD10).
+    Returns a manifest entry, or None if the signal has no rows yet."""
     key, label = sig["key"], sig["label"]
-    src = RAW / f"{key}_reports.csv"
-    if not src.exists():
-        print(f"[{key}] no {src.name} — skipping (run fetch.py first)")
-        return None
-    rows = list(csv.DictReader(src.open()))
-    print(f"[{key}] loaded {len(rows):,} reports")
+    codes = sig.get("codes") or []
+    rows = [r for c in codes for r in by_code.get(c, [])]
+    print(f"[{key}] {len(rows):,} reports (codes {codes})")
     if not rows:
         print(f"[{key}] empty — skipping")
         return None
@@ -284,11 +283,11 @@ def build_signal(sig, smd_ctx):
     # per SMD + citywide, assigned by the SAME point-in-polygon. Overlaid, not detected.
     aux_unit, aux_city, aux_meta = {}, {}, []
     for a in sig.get("aux", []):
-        path = RAW / f"{a['key']}_reports.csv"
-        if not path.exists():
+        arows = [r for c in (a.get("codes") or []) for r in by_code.get(c, [])]
+        if not arows:
             continue
         by_unit = defaultdict(lambda: defaultdict(int))
-        for r in csv.DictReader(path.open()):
+        for r in arows:
             try:
                 lat, lon = float(r["lat"]), float(r["lon"])
                 d = date.fromisoformat(r["date"])
@@ -411,13 +410,48 @@ def load_smd_context(name_pts):
             "centers": centers, "labels": labels, "source": source_meta}
 
 
+# ----------------------------- unified raw source --------------------------
+def collect_rows_by_code(codes_needed, start_year):
+    """Single pass over data/raw/_all_<year>.csv (year >= start_year), collecting
+    each needed SERVICECODE's rows (DCD10 — one read serves every signal + aux,
+    instead of a per-signal CSV). Returns {code: [row dicts]}."""
+    by_code = {c: [] for c in codes_needed}
+    files = sorted(RAW.glob("_all_*.csv"))
+    if not files:
+        raise SystemExit("No data/raw/_all_*.csv — run fetch.py first.")
+    scanned = 0
+    for f in files:
+        try:
+            y = int(f.stem.rsplit("_", 1)[-1])
+        except ValueError:
+            continue
+        if y < start_year:
+            continue
+        with f.open() as fh:
+            for r in csv.DictReader(fh):
+                scanned += 1
+                bucket = by_code.get(r.get("code"))
+                if bucket is not None:
+                    bucket.append(r)
+    print(f"Scanned {scanned:,} rows from {len(files)} _all_*.csv; "
+          f"kept {sum(len(v) for v in by_code.values()):,} across {len(codes_needed)} codes")
+    return by_code
+
+
 # ----------------------------- main ----------------------------------------
 def main():
     name_pts = load_name_points()
     smd_ctx = load_smd_context(name_pts)
+    signals = C.resolve_signals()
+    needed = set()
+    for sig in signals:
+        needed |= set(sig.get("codes") or [])
+        for a in sig.get("aux", []):
+            needed |= set(a.get("codes") or [])
+    by_code = collect_rows_by_code(needed, C.START_YEAR)
     manifest = []
-    for sig in C.resolve_signals():
-        entry = build_signal(sig, smd_ctx)
+    for sig in signals:
+        entry = build_signal(sig, smd_ctx, by_code)
         if entry:
             manifest.append(entry)
     (AGG / "signals.json").write_text(json.dumps(
