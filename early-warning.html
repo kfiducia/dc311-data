@@ -44,6 +44,13 @@
   .tag{display:inline-block;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--accent);
     border:1px solid var(--line);border-radius:2px;padding:3px 8px;margin-bottom:12px}
   .asof{color:var(--muted);font-size:12px;margin:0 0 14px}
+  /* data-quality / coverage warnings (DCD11) */
+  .dq{margin:0 0 18px;display:flex;flex-direction:column;gap:6px}
+  .dq .dqrow{font-size:12.5px;line-height:1.5;padding:8px 11px;border-radius:0 3px 3px 0;
+    border:1px solid var(--line);border-left:3px solid var(--alert);background:rgba(192,57,43,.06);color:var(--ink-2)}
+  .dq .dqrow b{color:var(--alert)}
+  .dq .dqrow.note{border-left-color:var(--close);background:rgba(61,125,140,.06)}
+  .dq .dqrow.note b{color:var(--close)}
   /* DCD6 signal picker — tabs across the top */
   .sigbar{margin:14px 0 14px}
   .sigtabs{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px}
@@ -160,6 +167,9 @@
   <h1 id="pageTitle">Where are the rats — is reporting working, and where could we get ahead?</h1>
   <p class="lede" id="lede">Live read on DC rat reports: where it's <strong>hot right now</strong>, what's <strong>trending up</strong>, which recent surges we <strong>could have caught early</strong>, and whether <strong>abatement is actually driving reports down</strong>. Detection runs per ANC Single Member District, labeled by neighborhood, scored causally so "should-have-known" dates are honest.</p>
   <p class="asof" id="asof">—</p>
+
+  <!-- DATA-QUALITY / COVERAGE WARNINGS (DCD11) -->
+  <div class="dq" id="dataQuality" hidden></div>
 
   <!-- IMPACT STRIP: does reporting work? -->
   <div class="impact" id="impact"></div>
@@ -314,6 +324,7 @@ function init(data){
     A.corrCity=pearson(data.city.counts, data.city.aux[A.aux0.key]);
     if(cc) cc.innerHTML=`<b>${A.aux0.label}</b> shown on the right axis (purple).`;
   } else if(cc){ cc.textContent=''; } // clear stale caption when switching to a signal with no aux
+  renderCoverage();
   buildImpact(); buildStatband(); buildBoard(); buildMap(); buildUnitSelect(); wireRange();
 
   // default: hottest-right-now SMD
@@ -333,6 +344,50 @@ function metrics(u){
   const mom = r0>1 ? r1/r0-1 : (r1>2?0.5:0);             // recent acceleration
   const bestLead=u.episodes.length?Math.max(...u.episodes.map(x=>x.lead_weeks)):0;
   return {hot,recent,mom,bestLead};
+}
+
+/* ---------- data-quality / coverage warnings (DCD11) ----------
+   Empty spots and implausible drops in 311 data are far more likely a collection
+   or collation gap than a real signal, so we flag them loudly rather than let the
+   detector treat them as truth. Computed from the citywide series already in the
+   alerts JSON (city.counts / city.expected) — no extra data needed. */
+function renderCoverage(){
+  const el=document.getElementById('dataQuality'); if(!el) return;
+  const city=A.data.city||{}, c=city.counts, e=city.expected||[], wk=A.weeks;
+  if(!c||!c.length||!wk){ el.hidden=true; el.innerHTML=''; return; }
+  const n=c.length, cap=s=>s?s.charAt(0).toUpperCase()+s.slice(1):s;
+  let first=c.findIndex(v=>v>0); if(first<0) first=0;
+  const weeks=n-first, rows=[];
+
+  // 1) thin baseline — the seasonal model needs several prior years of the same
+  //    week; a short history makes every "vs normal" / spike figure shaky.
+  if(weeks<104){
+    rows.push(['warn',`<b>Limited history.</b> ${cap(A.noun)} data begins `+
+      `<b>${dateShort(wk[first])}</b> (~${(weeks/52).toFixed(1)} yr). The seasonal `+
+      `baseline needs several prior years, so spikes and "vs normal" figures here are `+
+      `<b>provisional</b>.`]);
+  }
+  // 2) interior gaps — weeks we EXPECTED activity but got exactly zero: almost
+  //    certainly a reporting/collation gap, not a real drop to zero.
+  const gaps=[];
+  for(let i=first;i<n-1;i++){ if(e[i]!=null && e[i]>=3 && c[i]===0) gaps.push(i); }
+  if(gaps.length){
+    const eg=gaps.slice(-3).map(i=>dateShort(wk[i]).replace(/,.*/,'')).join(', ');
+    rows.push(['warn',`<b>Possible data gap.</b> ${gaps.length} week(s) report `+
+      `<b>zero</b> where activity was expected (e.g. ${eg}) — most likely a 311 `+
+      `collection/collation gap, <b>not</b> a real drop. Treat those troughs as missing.`]);
+  }
+  // 3) latest week is provisional — 311 keeps backfilling for a week or two, so the
+  //    final point routinely undercounts; a sharp last-week dip is usually lag.
+  const tail=c.slice(Math.max(first,n-9),n-1).filter(v=>v>0).sort((a,b)=>a-b);
+  const med=tail.length?tail[Math.floor(tail.length/2)]:0;
+  if(med>=4 && c[n-1]<med*0.5){
+    rows.push(['note',`<b>Latest week is provisional.</b> The most recent week `+
+      `(${dateShort(wk[n-1])}) is well below trend — reports keep arriving for a week `+
+      `or two, so recent dips usually reflect <b>incomplete data</b>, not a real decline.`]);
+  }
+  el.innerHTML=rows.map(([cls,html])=>`<div class="dqrow ${cls==='note'?'note':''}">${html}</div>`).join('');
+  el.hidden=rows.length===0;
 }
 
 /* ---------- impact strip: does reporting work? ---------- */
