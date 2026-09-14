@@ -41,6 +41,13 @@ SMD_LAYER = ("https://maps2.dcgis.dc.gov/dcgis/rest/services/DCGIS_DATA/"
 SMD_START_YEAR = 2016   # SMDs are 2023 boundaries; modern years are clean & bounded
 TOP_TYPES = 20          # top service categories kept; rest -> "Other"
 
+# DCD11: non-geographic requests (DC Government Information, DMV issues, ...) are
+# geocoded to a single default/placeholder coordinate — one pin can carry thousands
+# of requests, faking a district hotspot. No real address generates anywhere near
+# this many requests in a year, so any coordinate exceeding this per-year count is
+# treated as a placeholder: excluded from the map, counted in an explicit bucket.
+PLACEHOLDER_MAX_PER_YEAR = 1000
+
 # DCD10: smd.py no longer fetches request rows — it reads the unified
 # data/raw/_all_<year>.csv (produced by fetch.py) and groups by the GRANULAR
 # service (SERVICECODEDESCRIPTION), not the coarse handling agency. Only the SMD
@@ -204,22 +211,30 @@ def main():
     # aggregate: counts[year][type][smd_idx]  (+ "__all__");  unmapped[year][type]
     all_types = ["__all__"] + service_types
     counts = {str(y): {t: [0] * n_smd for t in all_types} for y in years}
-    unmapped = {str(y): {t: {"no_latlon": 0, "outside_smd": 0} for t in all_types}
-                for y in years}
+    unmapped = {str(y): {t: {"no_latlon": 0, "outside_smd": 0, "placeholder": 0}
+                         for t in all_types} for y in years}
 
     for y in years:
         ys = str(y)
         cy, uy = counts[ys], unmapped[ys]
-        n = 0
-        with files[y].open() as fh:
-            for r in csv.DictReader(fh):
-                n += 1
-                t = map_type(r.get("service"))
-                lat, lon = r.get("lat"), r.get("lon")
-                if not lat or not lon:
-                    uy["__all__"]["no_latlon"] += 1
-                    uy[t]["no_latlon"] += 1
-                    continue
+        rows = list(csv.DictReader(files[y].open()))
+        n = len(rows)
+        # Flag placeholder coordinates (a default pin carrying an implausible count
+        # of non-geographic requests) so they don't fake a district hotspot.
+        coord_counts = Counter((r.get("lat"), r.get("lon")) for r in rows
+                               if r.get("lat") and r.get("lon"))
+        placeholders = {c for c, k in coord_counts.items()
+                        if k > PLACEHOLDER_MAX_PER_YEAR}
+        for r in rows:
+            t = map_type(r.get("service"))
+            lat, lon = r.get("lat"), r.get("lon")
+            if not lat or not lon:
+                uy["__all__"]["no_latlon"] += 1
+                uy[t]["no_latlon"] += 1
+            elif (lat, lon) in placeholders:
+                uy["__all__"]["placeholder"] += 1
+                uy[t]["placeholder"] += 1
+            else:
                 idx = assign(float(lat), float(lon), geoms, tree)
                 if idx is None:
                     uy["__all__"]["outside_smd"] += 1
@@ -227,10 +242,11 @@ def main():
                 else:
                     cy["__all__"][idx] += 1
                     cy[t][idx] += 1
-        mapped = sum(cy["__all__"])
         um = uy["__all__"]
-        print(f"  {y}: {n:,} rows · {mapped:,} mapped · "
-              f"{um['no_latlon']:,} no-latlon · {um['outside_smd']:,} outside", file=sys.stderr)
+        print(f"  {y}: {n:,} rows · {sum(cy['__all__']):,} mapped · "
+              f"{um['no_latlon']:,} no-latlon · {um['outside_smd']:,} outside · "
+              f"{um['placeholder']:,} placeholder ({len(placeholders)} pins)",
+              file=sys.stderr)
 
     source_meta["n"] = n_smd
     out = {
