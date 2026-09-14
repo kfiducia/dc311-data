@@ -214,6 +214,7 @@ def main():
     unmapped = {str(y): {t: {"no_latlon": 0, "outside_smd": 0, "placeholder": 0}
                          for t in all_types} for y in years}
 
+    ph_points = {}   # (lat,lon) -> {"count": int, "svc": Counter} across all years
     for y in years:
         ys = str(y)
         cy, uy = counts[ys], unmapped[ys]
@@ -234,6 +235,9 @@ def main():
             elif (lat, lon) in placeholders:
                 uy["__all__"]["placeholder"] += 1
                 uy[t]["placeholder"] += 1
+                p = ph_points.setdefault((lat, lon), {"count": 0, "svc": Counter()})
+                p["count"] += 1
+                p["svc"][canon(r.get("service"))] += 1
             else:
                 idx = assign(float(lat), float(lon), geoms, tree)
                 if idx is None:
@@ -248,18 +252,30 @@ def main():
               f"{um['placeholder']:,} placeholder ({len(placeholders)} pins)",
               file=sys.stderr)
 
+    # The default/placeholder pins we excluded, largest first — so the UI can say
+    # exactly what was dropped and why (non-geographic requests defaulted to one
+    # address, e.g. the 311 call center). Rounded coords; top service per pin.
+    placeholder_points = sorted(
+        ({"lat": round(float(la), 6), "lon": round(float(lo), 6),
+          "count": v["count"], "top_service": v["svc"].most_common(1)[0][0]}
+         for (la, lo), v in ph_points.items()),
+        key=lambda p: -p["count"])
+
     source_meta["n"] = n_smd
     out = {
         "generated": datetime.now(timezone.utc).isoformat(),
         "boundary_source": source_meta,
         "method": ("point-in-polygon (shapely STRtree) of 311 LAT/LON against "
-                   "2023 SMD boundaries"),
+                   "2023 SMD boundaries; non-geographic requests dumped on a "
+                   "default coordinate (>%d/yr) are excluded — see placeholder_points"
+                   % PLACEHOLDER_MAX_PER_YEAR),
         "smds": smd_ids,
         "smd_labels": labels,
         "years": years,
         "service_types": service_types,
         "counts": counts,
         "unmapped": unmapped,
+        "placeholder_points": placeholder_points,
     }
     outp = ROOT / "agg" / "smd.json"
     outp.parent.mkdir(exist_ok=True)
