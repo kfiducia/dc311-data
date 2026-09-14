@@ -142,6 +142,10 @@
   #unmapped { margin: .6rem 0 0; font-family: var(--mono); font-size: .72rem;
     color: var(--ink-2); line-height: 1.5; }
   #unmapped b { color: var(--ink); font-weight: 700; }
+  #unmapped .ph-note { display: block; margin-top: .5rem; padding: .5rem .6rem;
+    border-left: 3px solid var(--alert, #c0392b); background: rgba(192,57,43,.06);
+    border-radius: 0 3px 3px 0; color: var(--ink-2); }
+  #unmapped .ph-note b { color: var(--alert, #c0392b); }
 
   /* ─── Footer ─── */
   footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; margin-top: 2rem; }
@@ -207,7 +211,8 @@
   <div class="card">
     <h2>Requests per SMD — ranked</h2>
     <p>Sorted high → low. A muted <b>Unmapped/Unknown</b> bar (bottom) counts requests
-      with no coordinates or that fell outside every SMD — counted here, never dropped.</p>
+      with no coordinates, that fell outside every SMD, or that were geocoded to a
+      non-specific default address — counted here, never dropped.</p>
     <div class="scroll-canvas"><div class="wrap-canvas"><canvas id="smdbar"></canvas></div></div>
     <p id="unmapped"></p>
   </div>
@@ -302,14 +307,14 @@ function init(D, geo) {
   }
 
   function unmappedFor(type) {
-    let no = 0, out = 0;
-    const add = u => { if (u) { no += u.no_latlon || 0; out += u.outside_smd || 0; } };
+    let no = 0, out = 0, ph = 0;
+    const add = u => { if (u) { no += u.no_latlon || 0; out += u.outside_smd || 0; ph += u.placeholder || 0; } };
     if (yearSel.value === 'all') {
       D.years.forEach(y => add(D.unmapped[y] && D.unmapped[y][type]));
     } else {
       add(D.unmapped[yearSel.value] && D.unmapped[yearSel.value][type]);
     }
-    return { no, out };
+    return { no, out, ph };
   }
 
   function render() {
@@ -318,13 +323,13 @@ function init(D, geo) {
     let rows = D.smds.map((id, i) => [id, vals[i]]).sort((a, b) => b[1] - a[1]);
     if (!showAll.checked) rows = rows.slice(0, TOP_N);
 
-    const { no, out } = unmappedFor(type);
+    const { no, out, ph } = unmappedFor(type);
     const mapped = sum(vals);
-    const total = mapped + no + out;
+    const total = mapped + no + out + ph;
 
     // append the unmapped bar as a distinct trailing bucket
     const labels = rows.map(r => r[0]).concat(['Unmapped/Unknown']);
-    const data = rows.map(r => r[1]).concat([no + out]);
+    const data = rows.map(r => r[1]).concat([no + out + ph]);
     const colors = rows.map(() => ACCENT).concat([MUTED]);
     const borders = rows.map(r => r[0] === selected ? cssv('--ink') : 'transparent').concat(['transparent']);
 
@@ -360,10 +365,20 @@ function init(D, geo) {
     });
 
     const pctNo = total ? (100 * no / total).toFixed(1) : '0.0';
-    document.getElementById('unmapped').innerHTML =
+    let html =
       `<b>${no.toLocaleString()}</b> requests (${pctNo}%) had no coordinates; ` +
       `<b>${out.toLocaleString()}</b> fell outside any SMD — counted here, not dropped. ` +
       `Mapped to an SMD: <b>${mapped.toLocaleString()}</b> of ${total.toLocaleString()}.`;
+    if (ph > 0) {
+      const topSvc = (D.placeholder_points && D.placeholder_points[0] &&
+                      D.placeholder_points[0].top_service) || 'DC Government Information';
+      html += `<br><span class="ph-note">⚠ Data adjusted: <b>${ph.toLocaleString()}</b> ` +
+        `non-geographic requests (e.g. ${topSvc}, DMV issues) were <b>excluded from the map</b> — ` +
+        `DC geocodes requests that have no real address to a single default location ` +
+        `(the 311 call center, 2720 Martin Luther King Jr Ave SE, Ward 8), which would otherwise ` +
+        `fake a huge Ward 8 hotspot.</span>`;
+    }
+    document.getElementById('unmapped').innerHTML = html;
   }
 
   // ---- choropleth map (shares the year + service-type filters) ----
