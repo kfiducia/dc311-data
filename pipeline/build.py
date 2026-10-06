@@ -210,6 +210,7 @@ def build_signal(sig, smd_ctx, by_code):
     list of report rows (from the unified data/raw/_all_<year>.csv, DCD10).
     Returns a manifest entry, or None if the signal has no rows yet."""
     key, label = sig["key"], sig["label"]
+    want_heat = key == C.RODENT["key"]  # DCD8: fine heatmap payload/CPU only for rats
     codes = sig.get("codes") or []
     rows = [r for c in codes for r in by_code.get(c, [])]
     print(f"[{key}] {len(rows):,} reports (codes {codes})")
@@ -238,12 +239,13 @@ def build_signal(sig, smd_ctx, by_code):
         min_wk = wk if min_wk is None or wk < min_wk else min_wk
         max_wk = wk if max_wk is None or wk > max_wk else max_wk
 
-        # fine res-9 heat grid (geometry-agnostic density overlay; kept as H3)
-        h9 = h3.latlng_to_cell(lat, lon, C.HEAT_RES)
-        if h9 not in heat_center:
-            hlat, hlon = h3.cell_to_latlng(h9)
-            heat_center[h9] = (round(hlat, 5), round(hlon, 5))
-        heat_week[h9][wk] += 1
+        if want_heat:
+            # fine res-9 heat grid (geometry-agnostic density overlay; kept as H3)
+            h9 = h3.latlng_to_cell(lat, lon, C.HEAT_RES)
+            if h9 not in heat_center:
+                hlat, hlon = h3.cell_to_latlng(h9)
+                heat_center[h9] = (round(hlat, 5), round(hlon, 5))
+            heat_week[h9][wk] += 1
 
         # detection/display unit = the SMD that contains the point (point-in-polygon)
         idx = smd.assign(lat, lon, geoms, tree)
@@ -355,12 +357,13 @@ def build_signal(sig, smd_ctx, by_code):
                  "pct_7d": round(100 * sum(1 for l in lags if l <= 7) / len(lags)),
                  "resolved_share": round(100 * len(lags) / len(rows))}
 
-    # fine heat grid
+    # fine heat grid — rats only (DCD8)
     heat = []
-    for cell, ctr in heat_center.items():
-        c = series_for(heat_week[cell])
-        if sum(c) >= C.HEAT_MIN_TOTAL:
-            heat.append({"c": [ctr[0], ctr[1]], "counts": c})
+    if want_heat:
+        for cell, ctr in heat_center.items():
+            c = series_for(heat_week[cell])
+            if sum(c) >= C.HEAT_MIN_TOTAL:
+                heat.append({"c": [ctr[0], ctr[1]], "counts": c})
 
     out = {
         "signal": key, "signal_label": label,
