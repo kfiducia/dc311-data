@@ -25,6 +25,12 @@ web, desktop web, native app) and submission-volume trends.
 - `agg/anomalies.json` — per-ward month-over-baseline anomaly board
 - `smd.html` + `agg/smd.json` + `agg/smd_boundaries.min.geojson` — per-SMD (ANC
   Single Member District) ranked chart + choropleth map
+- `agg/rats/` — rat-report export for the
+  [abatement coordinator](https://abatement.home-rule.org) (`pipeline/rats.py`):
+  per-year rat reports with their SMD, per-SMD rankings, and city blocks with
+  recent-report counts. **A published contract** — that site's cron polls
+  `agg/rats/meta.json` and reloads when `generated` changes; bump `SCHEMA` in
+  `rats.py` on any breaking change
 
 Volume figures use the full DC ArcGIS bulk dataset (4.97M requests, 2009–2026).
 Submission-method percentages are from per-request `source`/`origin` lookups
@@ -40,9 +46,9 @@ only source (HTML, `pipeline/`, the method-data seed); the built data lives in t
 deployed artifact. To add or change a radar signal, edit `SIGNALS` in
 `pipeline/config.py`.
 
-### Automated (monthly)
+### Automated (weekly)
 
-`.github/workflows/refresh.yml` runs on the **1st of each month** (and via the
+`.github/workflows/refresh.yml` runs **every Monday** (and via the
 Actions tab's **Run workflow** button). It pulls fresh data straight from DC's
 public ArcGIS API — no credentials needed — builds every artifact, sanity-gates
 them, then deploys the whole site straight to Pages (`upload-pages-artifact` +
@@ -55,6 +61,7 @@ python pipeline/refresh_submission.py # submission volume (current year) -> agg.
 python pipeline/categories.py         # complaint-category cube -> agg/categories.json
 python pipeline/anomaly.py            # per-ward month-over-baseline board -> agg/anomalies.json
 python pipeline/smd.py                # per-SMD counts + simplified boundaries -> agg/smd*.json
+python pipeline/rats.py               # rat-report export for the abatement coordinator -> agg/rats/
 python pipeline/guardrail.py          # fail (=> no deploy, last-good site stays live) if a build is empty/degenerate
 ```
 
@@ -74,7 +81,7 @@ pipeline first:
 
 ```
 cd pipeline && python fetch.py && python build.py && python refresh_submission.py \
-  && python categories.py && python anomaly.py && python smd.py
+  && python categories.py && python anomaly.py && python smd.py && python rats.py
 python pipeline/guardrail.py
 # then serve the repo root: python -m http.server 8000
 ```
@@ -91,5 +98,7 @@ data with empties. Refresh them by hand when the enriched CSVs are updated:
 SRC_DIR=/path/to/snap311/.../data python pipeline/refresh_methods.py
 ```
 
-Cadence for the automated volume/rat-radar refresh is **monthly** — DC's data
-lags and backfills prior months, so daily runs would be redundant.
+Cadence is **weekly**, so the abatement coordinator's rat history stays within
+about a week of DC. Raw checkpoints are still committed only **once a month**
+(scheduled runs in the month's first week; manual runs always commit) to keep the
+git history from growing four times faster.

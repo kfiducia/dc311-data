@@ -10,6 +10,10 @@ name: Refresh dashboard data
 #   * agg.json + dashboards                     — submission volume (refresh_submission)
 #   * agg/categories.json, agg/anomalies.json   — category + ward-anomaly boards
 #   * agg/smd.json, agg/smd_boundaries.min.geojson — SMD chart + choropleth (smd.py)
+#   * agg/rats/*  — rat-report export consumed by abatement.home-rule.org (rats.py).
+#     A PUBLISHED CONTRACT: that site's cron polls agg/rats/meta.json and reloads
+#     when `generated` changes. A deploy-only run (skip_build) publishes WITHOUT
+#     agg/rats/ (it's never committed); the consumer keeps its last good copy.
 #
 # NOT built here (kept as committed source, refreshed manually — see README):
 #   * submission METHOD/source numbers — derived from external snap311 CSVs that
@@ -17,11 +21,15 @@ name: Refresh dashboard data
 #     seed + inline dashboard DATA; refresh_submission only touches volume, so the
 #     method data is preserved.
 #
-# Cadence: monthly (DC's data lags and backfills, so daily is redundant).
+# Cadence: weekly, so the abatement coordinator's rat history stays within about a
+# week of DC. Raw checkpoints are only COMMITTED on the first run of each month
+# (see the last step) — weekly commits of the ~45 MB current-year CSV would bloat
+# the git history four times faster for no benefit, since every run re-pulls the
+# current year anyway.
 
 on:
   schedule:
-    - cron: "0 8 1 * *" # 08:00 UTC on the 1st of every month
+    - cron: "0 8 * * 1" # 08:00 UTC every Monday
   workflow_dispatch: # allow manual "Run workflow" from the Actions tab
     inputs:
       skip_build:
@@ -105,6 +113,12 @@ jobs:
         if: ${{ !inputs.skip_build }}
         run: python pipeline/smd.py
 
+      # Rat-report export for the abatement coordinator (reads the _all_ checkpoints;
+      # fetches DC's city-block "Squares" layer itself).
+      - name: Build rat-report export
+        if: ${{ !inputs.skip_build }}
+        run: python pipeline/rats.py
+
       # Sanity-gate the freshly built artifacts. On failure the job stops here, no
       # deploy runs, and the last good Pages deploy stays live.
       - name: Guardrail (build sanity)
@@ -138,9 +152,15 @@ jobs:
       # change (prior years are immutable), so the diff is small. Runs last, after
       # a successful deploy; skipped on deploy-only runs. refresh.yml has no push
       # trigger, so this commit does not re-trigger the workflow.
+      # Scheduled runs commit only in the first week of the month (one commit per
+      # month, as before the weekly cadence); manual runs always commit.
       - name: Commit refreshed raw data
         if: ${{ !inputs.skip_build }}
         run: |
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$(date -u +%-d)" -gt 7 ]; then
+            echo "Weekly run outside the month's first week — not committing raw data."
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/raw
