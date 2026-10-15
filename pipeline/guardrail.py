@@ -161,6 +161,40 @@ def check_signal_series(errs, warns):
         errs.append(f"{collapsed}/{evaluable} signals' recent weeks collapsed simultaneously — likely citywide ingestion dropout")
 
 
+def check_rats_export(require, warns):
+    """agg/rats/ is consumed by another site (abatement.home-rule.org), which loads
+    whatever it finds — so a truncated or inconsistent export must not deploy. The
+    consumer runs its own row-count guard too; this is the first line of defence."""
+    import hashlib
+    from datetime import date
+    meta, _ = _load("agg/rats/meta.json")
+    if meta in (None, "MALFORMED"):
+        require(False, f"agg/rats/meta.json missing or malformed ({meta})")
+        return
+    require(meta.get("schema") == 1, f"rats meta schema {meta.get('schema')!r} != 1")
+    totals = meta.get("totals") or {}
+    require((totals.get("reports") or 0) >= 100_000,
+            f"rats export too few reports: {totals.get('reports')}")
+    require((totals.get("blocks") or 0) >= 1_000,
+            f"rats export too few shaded blocks: {totals.get('blocks')}")
+    recent, inside = totals.get("recent_reports") or 0, totals.get("recent_in_block") or 0
+    require(recent and inside / recent >= 0.9,
+            f"only {inside}/{recent} recent rat reports landed in a block (squares fetch broken?)")
+    through = meta.get("data_through") or ""
+    try:
+        age = (date.today() - date.fromisoformat(through)).days
+        if age > 45:
+            warns.append(f"rats export data_through {through} is {age} days old")
+    except ValueError:
+        require(False, f"rats export bad data_through {through!r}")
+    files = meta.get("files") or {}
+    entries = list(files.get("reports") or []) + [files.get("smd") or {}, files.get("blocks") or {}]
+    for f in entries:
+        p = ROOT / "agg" / "rats" / (f.get("path") or "?")
+        ok = p.exists() and hashlib.sha256(p.read_bytes()).hexdigest() == f.get("sha256")
+        require(ok, f"rats export file {f.get('path')} missing or sha256 mismatch")
+
+
 def main():
     errs = []
     warns = []
@@ -218,6 +252,9 @@ def main():
     anom, _ = _load("agg/anomalies.json")
     require(isinstance(anom, dict) and "board" in anom,
             "agg/anomalies.json missing or empty")
+
+    # --- rat export for the abatement coordinator (a published contract — see rats.py)
+    check_rats_export(require, warns)
 
     # --- DCD13: dropout guardrails ---
     check_source_counts(errs, warns)

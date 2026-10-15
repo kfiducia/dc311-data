@@ -193,19 +193,33 @@ def main():
     print(f"SMD build (from _all): years {years[0]}-{years[-1]} · {n_smd} SMDs",
           file=sys.stderr)
 
+    # Group by service CODE, labelled with that code's most recent description. DC
+    # renames services without changing the code — S0311 went from "Rodent Inspection
+    # and Treatment" to "DC Health Rodent & Vector Control" mid-2026 — and grouping by
+    # the raw label split one service in two (2026 rats dropped ~70% on the map).
+    code_label = {}
+    for y in years:   # ascending, so the newest label wins
+        with files[y].open() as fh:
+            for r in csv.DictReader(fh):
+                if r.get("code") and (r.get("service") or "").strip():
+                    code_label[r["code"]] = r["service"].strip()
+
+    def svc(r):
+        return canon(code_label.get(r.get("code")) or r.get("service"))
+
     # first pass: global service totals -> top-20 kept, rest -> "Other". Grouped by
-    # the GRANULAR service (SERVICECODEDESCRIPTION), not the coarse handling agency.
+    # the GRANULAR service (code, see above), not the coarse handling agency.
     type_totals = Counter()
     for y in years:
         with files[y].open() as fh:
             for r in csv.DictReader(fh):
-                type_totals[canon(r.get("service"))] += 1
+                type_totals[svc(r)] += 1
     top = [t for t, _ in type_totals.most_common() if t != "Unknown type"][:TOP_TYPES]
     top_set = set(top)
     service_types = top + ["Other"]   # desc by volume, Other last
 
-    def map_type(t):
-        c = canon(t)
+    def map_type(r):
+        c = svc(r)
         return c if c in top_set else "Other"
 
     # aggregate: counts[year][type][smd_idx]  (+ "__all__");  unmapped[year][type]
@@ -227,7 +241,7 @@ def main():
         placeholders = {c for c, k in coord_counts.items()
                         if k > PLACEHOLDER_MAX_PER_YEAR}
         for r in rows:
-            t = map_type(r.get("service"))
+            t = map_type(r)
             lat, lon = r.get("lat"), r.get("lon")
             if not lat or not lon:
                 uy["__all__"]["no_latlon"] += 1
@@ -237,7 +251,7 @@ def main():
                 uy[t]["placeholder"] += 1
                 p = ph_points.setdefault((lat, lon), {"count": 0, "svc": Counter()})
                 p["count"] += 1
-                p["svc"][canon(r.get("service"))] += 1
+                p["svc"][svc(r)] += 1
             else:
                 idx = assign(float(lat), float(lon), geoms, tree)
                 if idx is None:
