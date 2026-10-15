@@ -85,8 +85,11 @@ def load_reports():
             if len(opened) != 10:
                 continue
             resolved = (r.get("resolved") or "")[:10]
+            # File each report under the year it was OPENED, not the source layer:
+            # DC's per-year layers carry a few next-year Jan 1 requests, and the
+            # consumer replaces one calendar year (by opened date) at a time.
             rows.append({"opened": opened, "resolved": resolved if len(resolved) == 10 else None,
-                         "lat": float(r["lat"]), "lon": float(r["lon"]), "year": y})
+                         "lat": float(r["lat"]), "lon": float(r["lon"]), "year": int(opened[:4])})
         print(f"  {y}: {len(rats):,} rat rows · {len(placeholders)} placeholder pins",
               file=sys.stderr)
     return rows, dropped
