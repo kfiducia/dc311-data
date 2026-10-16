@@ -31,7 +31,7 @@ RODENT = {
 }
 
 # How many *additional* data-driven signals (beyond rats) the radar offers.
-RADAR_TOP_N = 8
+RADAR_TOP_N = 4
 
 # Codes never offered as their own radar signal: the ever-present categories
 # (see EXCLUDE_CODES below) plus the ones already spoken for (rats, dead-animal).

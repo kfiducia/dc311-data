@@ -302,6 +302,8 @@ function init(data){
   A.noun=(data.signal_label||'reports').toLowerCase();
   const isRodent=data.signal==='rodent';
   A.isRodent=isRodent;
+  const heatBtn=document.querySelector('#layerSeg button[data-layer="heat"]');
+  if(heatBtn) heatBtn.hidden=!isRodent;
   document.getElementById('signalTag').textContent='signal · '+A.noun;
   document.getElementById('pageTitle').textContent=isRodent
     ? 'Where are the rats — is reporting working, and where could we get ahead?'
@@ -483,7 +485,7 @@ function buildMap(){
   A.pos=A.nEnd;
 
   A.unitLayer.addTo(map);
-  const start=location.hash==='#heat'?'heat':'now';
+  const start=(location.hash==='#heat'&&A.isRodent)?'heat':'now';
   document.querySelectorAll('#layerSeg button').forEach(b=>b.classList.toggle('on',b.dataset.layer===start));
   setLayer(start);
   document.querySelectorAll('#layerSeg button').forEach(b=>b.onclick=()=>{
@@ -509,6 +511,7 @@ function paintUnits(mode){
   });
 }
 function setLayer(which){
+  if(which==='heat'&&!A.isRodent) which='now';
   A.layer=which; const heatMode=which==='heat';
   document.getElementById('timerow').classList.toggle('hidden',!heatMode);
   if(heatMode){ A.map.removeLayer(A.unitLayer); A.heat.addTo(A.map);
