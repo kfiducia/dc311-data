@@ -34,7 +34,8 @@ from collections import Counter
 from datetime import datetime, timezone
 
 import shapely
-from shapely.geometry import Point, mapping, shape
+from shapely.geometry import MultiPolygon, Point, mapping, shape
+from shapely.ops import unary_union
 
 import smd as S
 
@@ -45,10 +46,11 @@ OUT = S.ROOT / "agg" / "rats"
 
 SQUARE_LAYER = ("https://maps2.dcgis.dc.gov/dcgis/rest/services/DCGIS_DATA/"
                 "Property_and_Land_WebMercator/MapServer/41")
-# Typical residential squares are 10-60k m^2. Parks, campuses and federal land run to
-# millions; shading a whole park for 3 reports would exaggerate, so bigger squares
-# still count toward every total but aren't published as shaded blocks.
-MAX_SHADED_SQUARE_M2 = 150_000
+# Every square with a recent report is published, parks and campuses included: the
+# consumer shades by reports SIZE-ADJUSTED to a typical block (reports x
+# min(1, typical_area / area)), so a few reports across a park no longer paint it dark
+# and no size cutoff is needed. (An earlier 150,000 m^2 cutoff hid a 408,000 m^2
+# parcel with 30 reports entirely.)
 COORD_DECIMALS = 5           # ~1 m — plenty for block outlines
 
 csv.field_size_limit(10 * 1024 * 1024)
@@ -181,7 +183,13 @@ def main():
     squares = fetch_squares()
     sq_geoms = [g for _, g, _ in squares]
     sq_tree = shapely.STRtree(sq_geoms)
-    block = {}   # id -> {"geom", "m2", "last12", "last24"}  (split squares merge by id)
+    # DC splits some squares into several pieces under one id (94 ids / 207 pieces).
+    # Counts merge by id, so the drawn shape must be the UNION of every piece — keeping
+    # only the first piece's geometry left 64 pieces with counted reports drawn blank.
+    pieces = {}
+    for sid, geom, _ in squares:
+        pieces.setdefault(sid, []).append(geom)
+    block = {}   # id -> {"last12", "last24"}
     recent = inside = 0
     for r in rows:
         if r["opened"] <= cut24:
@@ -192,18 +200,19 @@ def main():
         if hit is None:
             continue
         inside += 1
-        sid, geom, m2 = squares[hit]
-        b = block.setdefault(sid, {"geom": geom, "m2": m2, "last12": 0, "last24": 0})
+        sid = squares[hit][0]
+        b = block.setdefault(sid, {"last12": 0, "last24": 0})
         b["last24"] += 1
         if r["opened"] > cut12:
             b["last12"] += 1
     block_rows, max_span = [], 0.0
     for sid, b in sorted(block.items()):
-        if b["m2"] > MAX_SHADED_SQUARE_M2:
-            continue
-        x0, y0, x1, y1 = b["geom"].bounds
+        geom = pieces[sid][0] if len(pieces[sid]) == 1 else unary_union(pieces[sid])
+        if geom.geom_type not in ("Polygon", "MultiPolygon"):   # touching-only pieces
+            geom = MultiPolygon([g for g in getattr(geom, "geoms", [geom]) if g.geom_type == "Polygon"])
+        x0, y0, x1, y1 = geom.bounds
         max_span = max(max_span, y1 - y0)
-        g = mapping(b["geom"])
+        g = mapping(geom)
         g = {"type": g["type"], "coordinates": S._round_coords(g["coordinates"], COORD_DECIMALS)}
         block_rows.append([sid, round(y0, 6), round(y1, 6), round(x0, 6), round(x1, 6),
                            b["last12"], b["last24"], g])
