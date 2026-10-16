@@ -34,7 +34,8 @@ from collections import Counter
 from datetime import datetime, timezone
 
 import shapely
-from shapely.geometry import Point, mapping, shape
+from shapely.geometry import MultiPolygon, Point, mapping, shape
+from shapely.ops import unary_union
 
 import smd as S
 
@@ -182,7 +183,13 @@ def main():
     squares = fetch_squares()
     sq_geoms = [g for _, g, _ in squares]
     sq_tree = shapely.STRtree(sq_geoms)
-    block = {}   # id -> {"geom", "m2", "last12", "last24"}  (split squares merge by id)
+    # DC splits some squares into several pieces under one id (94 ids / 207 pieces).
+    # Counts merge by id, so the drawn shape must be the UNION of every piece — keeping
+    # only the first piece's geometry left 64 pieces with counted reports drawn blank.
+    pieces = {}
+    for sid, geom, _ in squares:
+        pieces.setdefault(sid, []).append(geom)
+    block = {}   # id -> {"last12", "last24"}
     recent = inside = 0
     for r in rows:
         if r["opened"] <= cut24:
@@ -193,16 +200,19 @@ def main():
         if hit is None:
             continue
         inside += 1
-        sid, geom, m2 = squares[hit]
-        b = block.setdefault(sid, {"geom": geom, "m2": m2, "last12": 0, "last24": 0})
+        sid = squares[hit][0]
+        b = block.setdefault(sid, {"last12": 0, "last24": 0})
         b["last24"] += 1
         if r["opened"] > cut12:
             b["last12"] += 1
     block_rows, max_span = [], 0.0
     for sid, b in sorted(block.items()):
-        x0, y0, x1, y1 = b["geom"].bounds
+        geom = pieces[sid][0] if len(pieces[sid]) == 1 else unary_union(pieces[sid])
+        if geom.geom_type not in ("Polygon", "MultiPolygon"):   # touching-only pieces
+            geom = MultiPolygon([g for g in getattr(geom, "geoms", [geom]) if g.geom_type == "Polygon"])
+        x0, y0, x1, y1 = geom.bounds
         max_span = max(max_span, y1 - y0)
-        g = mapping(b["geom"])
+        g = mapping(geom)
         g = {"type": g["type"], "coordinates": S._round_coords(g["coordinates"], COORD_DECIMALS)}
         block_rows.append([sid, round(y0, 6), round(y1, 6), round(x0, 6), round(x1, 6),
                            b["last12"], b["last24"], g])
