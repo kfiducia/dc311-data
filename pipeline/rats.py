@@ -45,10 +45,11 @@ OUT = S.ROOT / "agg" / "rats"
 
 SQUARE_LAYER = ("https://maps2.dcgis.dc.gov/dcgis/rest/services/DCGIS_DATA/"
                 "Property_and_Land_WebMercator/MapServer/41")
-# Typical residential squares are 10-60k m^2. Parks, campuses and federal land run to
-# millions; shading a whole park for 3 reports would exaggerate, so bigger squares
-# still count toward every total but aren't published as shaded blocks.
-MAX_SHADED_SQUARE_M2 = 150_000
+# Every square with a recent report is published, parks and campuses included: the
+# consumer shades by reports SIZE-ADJUSTED to a typical block (reports x
+# min(1, typical_area / area)), so a few reports across a park no longer paint it dark
+# and no size cutoff is needed. (An earlier 150,000 m^2 cutoff hid a 408,000 m^2
+# parcel with 30 reports entirely.)
 COORD_DECIMALS = 5           # ~1 m — plenty for block outlines
 
 csv.field_size_limit(10 * 1024 * 1024)
@@ -199,8 +200,6 @@ def main():
             b["last12"] += 1
     block_rows, max_span = [], 0.0
     for sid, b in sorted(block.items()):
-        if b["m2"] > MAX_SHADED_SQUARE_M2:
-            continue
         x0, y0, x1, y1 = b["geom"].bounds
         max_span = max(max_span, y1 - y0)
         g = mapping(b["geom"])
