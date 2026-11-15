@@ -15,7 +15,9 @@ web, desktop web, native app) and submission-volume trends.
 - `early-warning.html` — **Complaint Radar**: one seasonal-anomaly detector,
   selectable across signals **chosen data-driven** — rats (special, with a
   dead-animal overlay) plus the top-N categories by volume, minus the ubiquitous
-  ones (`config.resolve_signals`, `RADAR_TOP_N`)
+  ones (`config.resolve_signals`, `RADAR_TOP_N`). The fine-grained "activity over
+  time" heatmap is built for the rat signal only; other signals omit it (keeps the
+  payload small — see DCD8)
 - `submission_methods.md` — written findings
 - `export_*.csv` — underlying aggregate tables
 - `agg.json` — aggregated volume/method data behind the dashboard
