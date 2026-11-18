@@ -41,12 +41,15 @@ against DC's live 311 API (sampled). All data is aggregate DC public-records dat
 ## Refresh
 
 The dashboards are static, and the machine-generated data (`agg/*.json`,
-`agg/smd_boundaries.min.geojson`, and the volume half of `agg.json`) is **built in
-CI and published as a GitHub Pages artifact — it is not committed to git.** This
-keeps the repo from growing megabytes of regenerated JSON every month. `main` holds
-only source (HTML, `pipeline/`, the method-data seed); the built data lives in the
-deployed artifact. To add or change a radar signal, edit `SIGNALS` in
-`pipeline/config.py`.
+`agg/smd_boundaries.min.geojson`) is **built in CI and published as a GitHub Pages
+artifact — it is not committed to git.** This keeps the repo from growing megabytes
+of regenerated JSON every month. Two exceptions are committed back to `main` once a
+month (first run of the month, or any manual run): the raw per-year checkpoints in
+`data/raw/` (so later runs only re-pull the current year), and the small
+submission-volume seed: `agg.json`, its embedded copy in `dashboard.html`, and the
+volume CSVs, ~0.5 MB in total (DCD19). Committing the seed stops a year that has
+just ended from being re-pulled from ArcGIS every week. To add or change a radar
+signal, edit `SIGNALS` in `pipeline/config.py`.
 
 ### Automated (weekly)
 
@@ -54,7 +57,8 @@ deployed artifact. To add or change a radar signal, edit `SIGNALS` in
 Actions tab's **Run workflow** button). It pulls fresh data straight from DC's
 public ArcGIS API — no credentials needed — builds every artifact, sanity-gates
 them, then deploys the whole site straight to Pages (`upload-pages-artifact` +
-`deploy-pages`); nothing is pushed back to `main`:
+`deploy-pages`). Apart from the monthly commit described above, nothing is pushed
+back to `main`:
 
 ```
 python pipeline/fetch.py              # radar: every resolve_signals() service type + aux -> data/raw/

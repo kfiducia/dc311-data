@@ -9,13 +9,13 @@
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://kfiducia.github.io/dc311-data/">
 <meta property="og:title" content="DC 311 — Methods & Rates">
-<meta property="og:description" content="How DC residents file 311 service requests — submission channels and volume, 2016–2026.">
+<meta property="og:description" content="How DC residents file 311 service requests — submission channels and volume since 2016.">
 <meta property="og:image" content="https://kfiducia.github.io/dc311-data/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="DC 311 — Methods & Rates">
-<meta name="twitter:description" content="How DC residents file 311 — submission channels & volume, 2016–2026.">
+<meta name="twitter:description" content="How DC residents file 311 — submission channels & volume since 2016.">
 <meta name="twitter:image" content="https://kfiducia.github.io/dc311-data/og.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -416,8 +416,8 @@
     <div class="card"><h2>Raw source values</h2><p>Exact <code>source</code> field (selected year)</p><div class="wrap-canvas"><canvas id="source"></canvas></div></div>
     <div class="card"><h2>Origin (system of record)</h2><p><code>origin</code> field</p><div class="wrap-canvas"><canvas id="origin"></canvas></div></div>
     <div class="card"><h2>Channel mix over time (weekly)</h2><p>Selected year. Weekly share by channel. <b>Hatched bars = weeks with insufficient samples (n&lt;120)</b></p><div class="wrap-canvas"><canvas id="mixweek"></canvas></div></div>
-    <div class="card wide"><h2>Submission rate — volume by year</h2><p>All requests, full bulk dataset 2009–2026 (2026 partial — through mid-June)</p><div class="wrap-canvas"><canvas id="byyear"></canvas></div></div>
-    <div class="card wide"><h2>Submission rate — monthly volume (2026)</h2><p>Requests created per month this year</p><div class="wrap-canvas"><canvas id="month2026"></canvas></div></div>
+    <div class="card wide"><h2>Submission rate — volume by year</h2><p id="byyear-note">All requests, full bulk dataset</p><div class="wrap-canvas"><canvas id="byyear"></canvas></div></div>
+    <div class="card wide"><h2 id="monthcur-title">Submission rate — monthly volume</h2><p>Requests created per month this year</p><div class="wrap-canvas"><canvas id="monthcur"></canvas></div></div>
     <div class="card"><h2>Method by service type</h2><p>Source mix for the top service categories (selected year)</p><div class="wrap-canvas"><canvas id="bysvc"></canvas></div></div>
     <div class="card"><h2>Time of day</h2><p>When requests come in — <b>DC local time</b>. Grey envelope = all requests (exact, from bulk); channel lines shown for cleanly-sampled years</p><div class="wrap-canvas"><canvas id="byhour"></canvas></div></div>
   </div>
@@ -612,19 +612,28 @@ sel.addEventListener('change', e=>renderMethods(e.target.value));
 renderMethods(yopts[0]);
 
 // ---- volume by year (static, all years) ----
+// The current (partial) year is the latest in by_year — not hard-coded, so the
+// charts follow the January rollover (DCD19).
 const yrs = DATA.by_year.map(d=>d[0]);
+const CUR = Math.max(...yrs);
+const curThrough = DATA.data_through && DATA.data_through.startsWith(CUR+'-')
+  ? new Date(DATA.data_through+'-01T12:00').toLocaleString('en-US',{month:'long'}) : null;
+document.getElementById('byyear-note').textContent =
+  `All requests, full bulk dataset ${yrs[0]}–${CUR} (${CUR} partial${curThrough?' — through '+curThrough:''})`;
 new Chart(byyear, { type:'bar',
   data:{ labels:yrs,
     datasets:[{ data:DATA.by_year.map(d=>d[1]),
-      backgroundColor:yrs.map(y=>y===2026?ACCENT:PALETTE[1]) }]},
+      backgroundColor:yrs.map(y=>y===CUR?ACCENT:PALETTE[1]) }]},
   options:{ maintainAspectRatio:false, plugins:{legend:{display:false},
-    tooltip:{callbacks:{label:c=>c.raw.toLocaleString()+(c.label==2026?' (partial)':'')}}},
+    tooltip:{callbacks:{label:c=>c.raw.toLocaleString()+(c.label==CUR?' (partial)':'')}}},
     scales:{x:{grid:{display:false}},y:{grid:{color:LINE},ticks:{callback:v=>(v/1000)+'k'}}}}});
 
-// ---- monthly 2026 ----
-new Chart(month2026, { type:'line',
-  data:{ labels:DATA.month_2026.map(d=>d[0]),
-    datasets:[{ data:DATA.month_2026.map(d=>d[1]), borderColor:ACCENT,
+// ---- monthly, current year ----
+const curMonths = DATA['month_'+CUR] || DATA.by_month.filter(d=>d[0].startsWith(CUR+'-'));
+document.getElementById('monthcur-title').textContent = `Submission rate — monthly volume (${CUR})`;
+new Chart(monthcur, { type:'line',
+  data:{ labels:curMonths.map(d=>d[0]),
+    datasets:[{ data:curMonths.map(d=>d[1]), borderColor:ACCENT,
       backgroundColor:ACCENT+'26', fill:true, tension:.25, pointRadius:3 }]},
   options:{ maintainAspectRatio:false, plugins:{legend:{display:false},
     tooltip:{callbacks:{label:c=>c.raw.toLocaleString()+' requests'}}},

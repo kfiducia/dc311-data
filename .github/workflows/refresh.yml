@@ -154,6 +154,11 @@ jobs:
       # trigger, so this commit does not re-trigger the workflow.
       # Scheduled runs commit only in the first week of the month (one commit per
       # month, as before the weekly cadence); manual runs always commit.
+      # DCD19: also persist the submission-volume seed (agg.json + its embedded
+      # copy in dashboard.html + the volume CSVs, ~0.5 MB). Without it, after each
+      # January rollover refresh_submission re-pulls last year's hour-of-day from
+      # ArcGIS on every run, because the committed seed still holds the mid-year
+      # snapshot. Committing monthly makes that a one-time pull.
       - name: Commit refreshed raw data
         if: ${{ !inputs.skip_build }}
         run: |
@@ -163,10 +168,10 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/raw
+          git add data/raw agg.json dashboard.html export_by_year.csv export_by_month.csv
           if git diff --cached --quiet; then
             echo "No raw-data changes to commit."
           else
-            git commit -m "chore(data): refresh raw 311 checkpoints (current year)"
+            git commit -m "chore(data): refresh raw 311 checkpoints + volume seed (current year)"
             git push origin HEAD:main
           fi
