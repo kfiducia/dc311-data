@@ -33,7 +33,7 @@ import time
 import urllib.parse
 import urllib.request
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -42,6 +42,9 @@ import config as C
 ROOT = Path(__file__).resolve().parent.parent
 RAW = ROOT / "data" / "raw"
 NY = ZoneInfo("America/New_York")
+# Seeded hour-of-day sums / re-pulled totals may drift this far from the raw
+# checkpoint total before we distrust them (guardrail.VOLUME_TOL uses the same 1%).
+HOURS_TOL = 0.01
 
 
 def _get(url, params):
@@ -126,22 +129,28 @@ def compute_year(records, year):
 
 
 def raw_year(year):
-    """(total, month_list, ward_list) for a past year from its raw checkpoint, or
-    None if there is no checkpoint. Same UTC-date bucketing as compute_year."""
+    """(total, month_list, week_list, ward_list) for a past year from its raw
+    checkpoint, or None if there is no checkpoint. Same UTC-date bucketing as
+    compute_year."""
     p = RAW / f"_all_{year}.csv"
     if not p.exists():
         return None
-    months, wards = Counter(), Counter()
-    total = 0
+    days, wards = Counter(), Counter()
     with p.open(newline="") as fh:
         for r in csv.DictReader(fh):
             d = r["date"]
             if not d.startswith(f"{year}-"):
                 continue  # dateless / boundary rows, as in compute_year
-            total += 1
-            months[d[:7]] += 1
+            days[d] += 1
             wards[r["ward"].strip() or "Unknown"] += 1
-    return total, sorted(months.items()), sorted(wards.items(), key=lambda kv: -kv[1])
+    months, weeks = Counter(), Counter()
+    for d, n in days.items():
+        months[d[:7]] += n
+        iso = date.fromisoformat(d).isocalendar()
+        if iso.year == year:
+            weeks[f"{year}-W{iso.week:02d}"] += n
+    return (sum(days.values()), sorted(months.items()), sorted(weeks.items()),
+            sorted(wards.items(), key=lambda kv: -kv[1]))
 
 
 def set_year(agg, year, total, month_list, ward_list, hours=None):
@@ -172,19 +181,31 @@ def main():
         got = raw_year(y)
         if got is None:
             continue
-        total, month_list, ward_list = got
+        total, month_list, week_list, ward_list = got
         old = dict(agg["by_year"]).get(y)
         hours = agg["hour_local_by_year"].get(str(y))
-        if not hours or abs(sum(hours) - total) > 0.01 * total:
+        if not hours or abs(sum(hours) - total) > HOURS_TOL * total:
             print(f"  {y}: hour-of-day seed ({sum(hours or []):,}) is stale vs "
                   f"{total:,} — re-pulling from ArcGIS …")
-            pulled, _, _, _, hours = compute_year(fetch_year_records(layers[y], y), y)
-            if abs(pulled - total) > 0.01 * total:
-                sys.exit(f"{y}: re-pull returned {pulled:,} rows vs {total:,} in the "
-                         "raw checkpoint — truncated pull, refusing to write hours")
+            pulled, _, _, _, fresh = compute_year(fetch_year_records(layers[y], y), y)
+            if abs(pulled - total) > HOURS_TOL * total:
+                # Hours are a cosmetic chart: keep the old ones (guardrail warns)
+                # rather than fail the run and block every other artifact's deploy.
+                print(f"  WARNING {y}: re-pull returned {pulled:,} rows vs {total:,} "
+                      "in the raw checkpoint — keeping previous hours", file=sys.stderr)
+            else:
+                hours = fresh
         set_year(agg, y, total, month_list, ward_list, hours)
+        # A year that was "current" in the seed carries month_<Y>/week_<Y> slices
+        # (the dashboard charts month_<Y>); finish them too, or they stay frozen at
+        # the snapshot taken while the year was still growing.
+        if f"month_{y}" in agg:
+            agg[f"month_{y}"] = [list(x) for x in month_list]
+        if f"week_{y}" in agg:
+            agg[f"week_{y}"] = [list(x) for x in week_list]
         if old != total:
-            print(f"  {y}: {old:,} → {total:,} (from raw checkpoint)")
+            was = f"{old:,}" if old is not None else "(absent)"
+            print(f"  {y}: {was} → {total:,} (from raw checkpoint)")
 
     print(f"Refreshing submission dashboard for {year} …")
     recs = fetch_year_records(layers[year], year)

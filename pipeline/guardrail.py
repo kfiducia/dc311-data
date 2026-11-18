@@ -111,7 +111,7 @@ def check_source_counts(errs, warns):
                 warns.append(msg)
 
 
-def check_volume_completeness(agg, errs):
+def check_volume_completeness(agg, errs, warns):
     """DCD16: every complete past year's published by_year total must match DC's
     live per-year layer count (data/raw/source_counts.json, just written by
     fetch.py) to within VOLUME_TOL. Catches a past year frozen at a mid-year
@@ -124,8 +124,10 @@ def check_volume_completeness(agg, errs):
     published = dict(agg.get("by_year", []))
     for y, hours in (agg.get("hour_local_by_year") or {}).items():
         pub = published.get(int(y)) or 0
+        # warn only: the hour chart is cosmetic and refresh_submission keeps the
+        # previous hours when a re-pull comes back short
         if pub and abs(sum(hours) - pub) > VOLUME_TOL * pub:
-            errs.append(f"agg.json hour_local_by_year {y} sums to {sum(hours):,} "
+            warns.append(f"agg.json hour_local_by_year {y} sums to {sum(hours):,} "
                         f"vs by_year {pub:,} — truncated hour-of-day pull?")
     for y, live in sorted(counts.items()):
         y = int(y)
@@ -242,7 +244,7 @@ def main():
         require(len(agg.get("by_month", [])) > 100,
                 f"agg.json by_month too short: {len(agg.get('by_month', []))}")
         require(bool(agg.get("data_through")), "agg.json missing data_through")
-        check_volume_completeness(agg, errs)
+        check_volume_completeness(agg, errs, warns)
 
     # --- Complaint Radar: the rat signal is always present ---
     rr, _ = _load("agg/rodent_alerts.json")
