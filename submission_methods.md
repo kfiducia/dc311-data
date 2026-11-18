@@ -46,18 +46,22 @@ digital-majority story above.
 Yearly request volume:
 
 ```
-2009   21,617      2015  298,413      2021  360,842
-2010   30,199      2016  304,475      2022  386,708
-2011   10,550      2017  311,437      2023  425,262   <- peak
-2012  260,608      2018  338,903      2024  398,030
-2013  235,024      2019  367,055      2025  356,000
-2014  325,538      2020  305,612      2026  230,380   <- partial (thru mid-June)
+2009   21,617      2015  298,413      2021  360,810
+2010   30,199      2016  304,448      2022  386,691
+2011   10,550      2017  311,411      2023  425,213
+2012  260,608      2018  338,793      2024  422,282
+2013  235,024      2019  367,016      2025  440,562
+2014  325,538      2020  305,529      2026  457,347   <- partial (thru mid-Nov)
 ```
 
 - System matured 2012 (jump from ~10k to ~260k once intake was digitized).
-- Steady ~300–425k/yr since. 2023 peak, slight softening 2024–25.
-- 2026 at 230k through ~mid-June annualizes to ~490k — **on pace for a record year**,
-  worth confirming once the year completes.
+- Steady growth since, apart from the 2020 COVID dip: ~305k (2016) → 425k (2023) →
+  422k (2024, flat) → 441k (2025). 2026 already passed 2025 by mid-November, so it is
+  a **record year**.
+- 2016+ totals match DC's live per-year layer counts to within 0.05%. An earlier
+  version of this table showed a "slight softening 2024–25" (398k / 356k). That was a
+  pipeline bug, not a real trend: those two years were frozen at mid-year snapshots
+  (Dec 4, 2024 and Oct 6, 2025) and never completed. Fixed in DCD16.
 - See the monthly-2026 chart for within-year cadence.
 
 ## Channel mix over time (2026, weekly)

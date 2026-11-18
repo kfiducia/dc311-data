@@ -1,14 +1,27 @@
-"""Manually refresh the SUBMISSION dashboard's volume data to today.
+"""Refresh the SUBMISSION dashboard's volume data to today.
 
 The submission dashboard (dashboard.html / index.html) embeds all its data as a
-`const DATA = {...}` blob (== agg.json). History (2009 .. last year) is immutable;
-only the current year grows. So this refreshes just the current-year slices —
+`const DATA = {...}` blob (== agg.json). This rebuilds the volume slices —
 by_year / by_month / month_<Y> / week_<Y> / by_year_ward / hour_local_by_year —
-plus bulk_total + generated, straight from DC's ArcGIS API. The externally
-sampled *method* data (methods/source/origin/channel) is left untouched.
+plus bulk_total + generated. The externally sampled *method* data
+(methods/source/origin/channel) is left untouched.
+
+Where each year's numbers come from:
+  * current year — pulled live from DC's ArcGIS API (as before).
+  * past years with a raw checkpoint (data/raw/_all_<Y>.csv, 2016+) — year
+    total / months / wards are recomputed from the checkpoint every run. fetch.py
+    keeps those complete (it re-pulls any year whose live count changed), so a
+    year that was still growing when it was last refreshed gets finished here.
+    DCD16: previously only the current year was ever refreshed, which froze 2024
+    at its Dec-4 snapshot and 2025 at its Oct-6 snapshot.
+  * hour_local_by_year for those past years — the checkpoints only carry the UTC
+    *date*, not the time, so hours can't be derived from them. The seed's hours
+    are kept unless they no longer add up to the year's total (>1% off), in which
+    case that year is re-pulled from ArcGIS once to rebuild them.
+  * 2009–2015 — no raw checkpoint; kept as-is from the committed seed.
 
 Counts come from the "All Service Requests - <year>" layer (ALL requests, not
-just rodents). Hour-of-day is bucketed in DC local time.
+just rodents), bucketed by UTC date. Hour-of-day is bucketed in DC local time.
 
 Run:  ./.venv/bin/python pipeline/refresh_submission.py
 (Basis for the future auto-refresh; safe to re-run — it's idempotent.)
@@ -27,6 +40,7 @@ from zoneinfo import ZoneInfo
 import config as C
 
 ROOT = Path(__file__).resolve().parent.parent
+RAW = ROOT / "data" / "raw"
 NY = ZoneInfo("America/New_York")
 
 
@@ -35,7 +49,13 @@ def _get(url, params):
     for attempt in range(6):
         try:
             with urllib.request.urlopen(f"{url}?{q}", timeout=120) as r:
-                return json.load(r)
+                data = json.load(r)
+            # ArcGIS reports failures (e.g. an overloaded server) as HTTP 200 with
+            # an "error" body and no features — which the pager would otherwise
+            # read as end-of-data and silently truncate the year.
+            if "error" in data:
+                raise RuntimeError(f"ArcGIS error: {data['error']}")
+            return data
         except Exception as e:  # noqa: BLE001
             if attempt == 5:
                 raise
@@ -105,29 +125,76 @@ def compute_year(records, year):
     return total, month_list, week_list, ward_list, hours
 
 
+def raw_year(year):
+    """(total, month_list, ward_list) for a past year from its raw checkpoint, or
+    None if there is no checkpoint. Same UTC-date bucketing as compute_year."""
+    p = RAW / f"_all_{year}.csv"
+    if not p.exists():
+        return None
+    months, wards = Counter(), Counter()
+    total = 0
+    with p.open(newline="") as fh:
+        for r in csv.DictReader(fh):
+            d = r["date"]
+            if not d.startswith(f"{year}-"):
+                continue  # dateless / boundary rows, as in compute_year
+            total += 1
+            months[d[:7]] += 1
+            wards[r["ward"].strip() or "Unknown"] += 1
+    return total, sorted(months.items()), sorted(wards.items(), key=lambda kv: -kv[1])
+
+
+def set_year(agg, year, total, month_list, ward_list, hours=None):
+    """Swap one year's volume slices into agg (by_year / by_month / by_year_ward,
+    and hour_local_by_year when given)."""
+    ys = str(year)
+    agg["by_year"] = [[y, total if y == year else c] for y, c in agg["by_year"]]
+    if year not in [y for y, _ in agg["by_year"]]:
+        agg["by_year"].append([year, total])
+        agg["by_year"].sort()
+    agg["by_month"] = [[m, c] for m, c in agg["by_month"]
+                       if not m.startswith(ys + "-")] + [list(x) for x in month_list]
+    agg["by_month"].sort()
+    agg["by_year_ward"][ys] = [list(x) for x in ward_list]
+    if hours is not None:
+        agg["hour_local_by_year"][ys] = hours
+
+
 def main():
     agg = json.loads((ROOT / "agg.json").read_text())
     layers = year_layers()
     year = max(layers)  # current year
+
+    # Past years: recompute from the (complete) raw checkpoints.
+    for y in sorted(layers):
+        if y == year:
+            continue
+        got = raw_year(y)
+        if got is None:
+            continue
+        total, month_list, ward_list = got
+        old = dict(agg["by_year"]).get(y)
+        hours = agg["hour_local_by_year"].get(str(y))
+        if not hours or abs(sum(hours) - total) > 0.01 * total:
+            print(f"  {y}: hour-of-day seed ({sum(hours or []):,}) is stale vs "
+                  f"{total:,} — re-pulling from ArcGIS …")
+            pulled, _, _, _, hours = compute_year(fetch_year_records(layers[y], y), y)
+            if abs(pulled - total) > 0.01 * total:
+                sys.exit(f"{y}: re-pull returned {pulled:,} rows vs {total:,} in the "
+                         "raw checkpoint — truncated pull, refusing to write hours")
+        set_year(agg, y, total, month_list, ward_list, hours)
+        if old != total:
+            print(f"  {y}: {old:,} → {total:,} (from raw checkpoint)")
+
     print(f"Refreshing submission dashboard for {year} …")
     recs = fetch_year_records(layers[year], year)
     total, month_list, week_list, ward_list, hours = compute_year(recs, year)
     print(f"  {year}: {total:,} requests · {len(month_list)} months "
           f"(latest {month_list[-1][0]}={month_list[-1][1]:,})")
 
-    ys = str(year)
-    # by_year: replace this year's total
-    agg["by_year"] = [[y, total if y == year else c] for y, c in agg["by_year"]]
-    if year not in [y for y, _ in agg["by_year"]]:
-        agg["by_year"].append([year, total])
-    # by_month: keep other years, swap in fresh current-year months
-    agg["by_month"] = [[m, c] for m, c in agg["by_month"]
-                       if not m.startswith(ys + "-")] + [list(x) for x in month_list]
-    agg["by_month"].sort()
+    set_year(agg, year, total, month_list, ward_list, hours)
     agg[f"month_{year}"] = [list(x) for x in month_list]
     agg[f"week_{year}"] = [list(x) for x in week_list]
-    agg["by_year_ward"][ys] = [list(x) for x in ward_list]
-    agg["hour_local_by_year"][ys] = hours
     agg["bulk_total"] = sum(c for _, c in agg["by_year"])
     agg["generated"] = datetime.now(timezone.utc).isoformat()
     # Freshness stamp: latest month present in the (now-refreshed) volume series.

@@ -37,6 +37,7 @@ CUR_YEAR_DROP_WARN = 0.05    # warn if current-year count is >5% below baseline
 CUR_YEAR_DROP_FAIL = 0.20    # FAIL (block deploy) if >20% below — an egregious crater
 PRIOR_YEAR_DROP_WARN = 0.01  # warn if a prior (frozen) year drops at all
 PRIOR_YEAR_DROP_FAIL = 0.10  # FAIL if a prior year drops >10% — source truncated
+VOLUME_TOL = 0.01            # DCD16: published past-year total vs live layer count
 
 # Per-signal series (agg/<key>_alerts.json):
 BACKFILL_LAG_WEEKS = 2     # trailing weeks still filling in (DC lags); the UI already
@@ -108,6 +109,34 @@ def check_source_counts(errs, warns):
                 errs.append(msg)
             elif drop >= PRIOR_YEAR_DROP_WARN:
                 warns.append(msg)
+
+
+def check_volume_completeness(agg, errs):
+    """DCD16: every complete past year's published by_year total must match DC's
+    live per-year layer count (data/raw/source_counts.json, just written by
+    fetch.py) to within VOLUME_TOL. Catches a past year frozen at a mid-year
+    snapshot — 2024/2025 shipped ~6%/~19% short for a year because nothing
+    re-finished them after the year rolled over."""
+    counts, _ = _load("data/raw/source_counts.json")
+    if not isinstance(counts, dict) or not counts:
+        return  # check_source_counts already reports a missing/malformed file
+    cur = max(int(y) for y in counts)
+    published = dict(agg.get("by_year", []))
+    for y, hours in (agg.get("hour_local_by_year") or {}).items():
+        pub = published.get(int(y)) or 0
+        if pub and abs(sum(hours) - pub) > VOLUME_TOL * pub:
+            errs.append(f"agg.json hour_local_by_year {y} sums to {sum(hours):,} "
+                        f"vs by_year {pub:,} — truncated hour-of-day pull?")
+    for y, live in sorted(counts.items()):
+        y = int(y)
+        if y >= cur or not live:
+            continue
+        pub = published.get(y)
+        if pub is None:
+            errs.append(f"agg.json by_year missing {y} (live count {live:,})")
+        elif abs(pub - live) > VOLUME_TOL * live:
+            errs.append(f"agg.json by_year {y} = {pub:,} vs live {live:,} "
+                        f"({pub / live - 1:+.1%}) — past year not refreshed?")
 
 
 def check_signal_series(errs, warns):
@@ -213,6 +242,7 @@ def main():
         require(len(agg.get("by_month", [])) > 100,
                 f"agg.json by_month too short: {len(agg.get('by_month', []))}")
         require(bool(agg.get("data_through")), "agg.json missing data_through")
+        check_volume_completeness(agg, errs)
 
     # --- Complaint Radar: the rat signal is always present ---
     rr, _ = _load("agg/rodent_alerts.json")
