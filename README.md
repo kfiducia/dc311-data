@@ -59,7 +59,7 @@ them, then deploys the whole site straight to Pages (`upload-pages-artifact` +
 ```
 python pipeline/fetch.py              # radar: every resolve_signals() service type + aux -> data/raw/
 python pipeline/build.py              # radar aggregates -> agg/<signal>_alerts.json + signals.json
-python pipeline/refresh_submission.py # submission volume (current year) -> agg.json + dashboards
+python pipeline/refresh_submission.py # submission volume -> agg.json + dashboards (current year live, past years from data/raw/)
 python pipeline/categories.py         # complaint-category cube -> agg/categories.json
 python pipeline/anomaly.py            # per-ward month-over-baseline board -> agg/anomalies.json
 python pipeline/smd.py                # per-SMD counts + simplified boundaries -> agg/smd*.json
@@ -69,7 +69,11 @@ python pipeline/guardrail.py          # fail (=> no deploy, last-good site stays
 
 The workflow caches the per-year checkpoint CSVs (`actions/cache` on `data/raw/`)
 and re-pulls only the current, still-growing year each run (radar via `fetch.py`,
-SMD via `smd.py`'s fetch manifest). `agg.json`, `agg/<signal>_alerts.json`,
+SMD via `smd.py`'s fetch manifest). `fetch.py` also re-pulls any past year whose
+live count changed, and `refresh_submission.py` rebuilds every 2016+ year's volume
+from those checkpoints, so a year that was still growing when it was last refreshed
+gets finished. The guardrail fails the deploy if any past year's published total
+is more than 1% off DC's live count (DCD16). `agg.json`, `agg/<signal>_alerts.json`,
 `agg/categories.json`, and `agg/smd.json` carry `generated`/`generated_at` +
 `data_through` stamps, surfaced in each dashboard's footer so staleness is visible.
 

@@ -51,7 +51,14 @@ def _get(url, params):
     for attempt in range(6):
         try:
             with urllib.request.urlopen(f"{url}?{q}", timeout=120) as r:
-                return json.load(r)
+                data = json.load(r)
+            # ArcGIS reports failures as HTTP 200 + an "error" body with no
+            # features; the pager would read that as end-of-data and rename a
+            # truncated .part to final — and since source_counts.json then records
+            # the live count, that year would never be re-fetched (DCD16).
+            if "error" in data:
+                raise RuntimeError(f"ArcGIS error: {data['error']}")
+            return data
         except Exception as e:  # noqa: BLE001 - simple retry
             if attempt == 5:
                 raise
