@@ -418,7 +418,7 @@
     <div class="card"><h2>Channel mix over time (weekly)</h2><p>Selected year. Weekly share by channel. <b>Hatched bars = weeks with insufficient samples (n&lt;120)</b></p><div class="wrap-canvas"><canvas id="mixweek"></canvas></div></div>
     <div class="card wide"><h2>Submission rate — volume by year</h2><p id="byyear-note">All requests, full bulk dataset</p><div class="wrap-canvas"><canvas id="byyear"></canvas></div></div>
     <div class="card wide"><h2 id="monthcur-title">Submission rate — monthly volume</h2><p>Requests created per month this year</p><div class="wrap-canvas"><canvas id="monthcur"></canvas></div></div>
-    <div class="card"><h2>Method by service type</h2><p>Source mix for the top service categories (selected year)</p><div class="wrap-canvas"><canvas id="bysvc"></canvas></div></div>
+    <div class="card"><h2>Method by service type</h2><p>Source mix for the top service categories (selected year). <b>Only types DC's API serves</b>: parking enforcement, DMV, info calls, yard waste, snow programs and dozens of other types are <b>missing from this data, not low</b>; rodents &amp; illegal dumping appear only from May 2026</p><div class="wrap-canvas"><canvas id="bysvc"></canvas></div></div>
     <div class="card"><h2>Time of day</h2><p>When requests come in — <b>DC local time</b>. Grey envelope = all requests (exact, from bulk); channel lines shown for cleanly-sampled years</p><div class="wrap-canvas"><canvas id="byhour"></canvas></div></div>
   </div>
 
@@ -644,8 +644,11 @@ new Chart(monthcur, { type:'line',
 document.getElementById('note').innerHTML =
   `<b>Reading this:</b> method charts use a near-complete per-request <code>source</code>/<code>origin</code>
    capture (cursor-paginated from DC's live API, ~90&ndash;115k records/year; the bulk dataset has no such field).
-   Caveat: roughly <b>half of DC's records carry no source in the API</b>, so this reflects the
-   source-available population, captured unbiased across the day. Channels are <b>coarse</b> (native app +
+   Caveat: DC's API serves only <b>about half of all requests, split by request type</b>. Dozens of types
+   (parking enforcement, residential parking permits, out-of-state parking, DMV, DC Government Information, scheduled
+   yard waste, snow programs, sanitation enforcement …) are <b>absent entirely</b>, even looked up by id. Rodents and
+   illegal dumping appear only from <b>2026-05-01</b>. A type missing here means <b>no data</b>, not few reports. Method
+   shares describe the served types only (captured unbiased across the day), and leave out phone-heavy ones like info calls. Channels are <b>coarse</b> (native app +
    mobile web merged into <i>Mobile (app&nbsp;+&nbsp;web)</i>) because DC's source labels drifted over the
    years &mdash; the <i>raw source</i> chart keeps the finer detail. Time-of-day is <b>DC local time</b>;
    per-channel lines show where sampling is unbiased. The two volume charts use the

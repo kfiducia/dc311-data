@@ -80,6 +80,14 @@ phone (`Agent`) over-indexes on trash/bulk/supercan categories (older callers), 
 browser/web over-index on walk-around categories. Exact crosstab in
 `export_source_by_service.csv`.
 
+**Types missing from this chart and crosstab have no data, not low volume.** DC's
+live API is the only source of `source`/`origin`. It serves some service types in
+full and others not at all. Parking Enforcement, Residential Parking Permit, ROSA,
+DMV, DC Government Information, Scheduled Yard Waste, Sanitation Enforcement and
+the snow programs (about half of all requests) are absent in every year checked
+(2024–2026). Rodents and Illegal Dumping appear only from 2026-05-01. See the README
+section "Why the API has gaps".
+
 ## Files
 
 - `dashboard.html` — interactive charts (open in browser)
@@ -91,9 +99,12 @@ browser/web over-index on walk-around categories. Exact crosstab in
 
 ## Caveats
 
-- Method % are from a 50/day sample, not the full population. Proportions are solid;
-  weekly/sub-category splits get thin fast.
+- Method % cover **only the request types DC's API serves**, about half of all
+  requests. Whole types (parking, DMV, info calls, yard waste, snow) are missing, so
+  the shares are not citywide. See README "Why the API has gaps". (The 50/day figures
+  above are from the original sample; the dashboard now uses a near-complete capture
+  of the served types.)
 - Times in the by-hour chart are **UTC** — subtract 4h for EDT before drawing
   push-notification conclusions.
-- 2026 volume is partial. 2025 bulk data exists despite the handoff note (the live
-  API still won't return 2025 source/origin, so 2025 has no method breakdown).
+- 2026 volume is partial. 2025 source/origin now resolves in the live API (checked
+  2026-11-18), and 2025 has a method breakdown like other years.

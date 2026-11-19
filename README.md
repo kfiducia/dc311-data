@@ -157,6 +157,17 @@ it is**:
   dumping ids, and sampled parking/yard-waste/DMV ids, all return an empty array
   when looked up by `service_request_id`. So no pager or query change can
   recover them.
+- **Spot-checked across years (2026-11-18).** Fresh pulls for 2024-03-12,
+  2025-08-20 and 2026-10-15 cover 48.7%, 49.6% and 50.8% of ArcGIS. On each day:
+  - every served type matched ArcGIS **exactly** (100%);
+  - the same never-served types (parking, RPP, ROSA, yard waste, info, DMV,
+    sanitation enforcement, abandoned vehicles …) were 0;
+  - rodents and dumping were 0 in 2024 and 2025 and complete in Oct 2026.
+
+  Lookups by id for 2024 and 2025 agreed: served types are found, and
+  never-served types and pre-cutover rodent ids are empty. The per-day count of
+  zero-coverage types (28–36) is lower than 60 only because small types file
+  nothing on a given day.
 
 The most likely explanation (an inference, not confirmed with DC) is that this
 API only fronts requests handled in DC's current Salesforce system. Agency
