@@ -125,9 +125,13 @@ def distill():
         raise SystemExit(f"no <year>.csv files in {SRC_DIR}")
     years = defaultdict(new_year_agg)
     allyr = new_year_agg()
+    seen = set()  # an SR at exactly 00:00:00 could land in two days' windows (pre-2026-11 capture)
     for y, fp in sorted(src.items()):
         with open(fp) as fh:
             for row in csv.DictReader(fh):
+                if row["service_request_id"] in seen:
+                    continue
+                seen.add(row["service_request_id"])
                 add_row(years[sr_year(row)], row)
                 add_row(allyr, row)
 
