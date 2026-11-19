@@ -161,6 +161,12 @@ def distill():
     if (shrunk or missing) and not os.environ.get("ALLOW_SHRINK"):
         raise SystemExit(f"refusing to write {METHODS.name}: years shrank {shrunk} / "
                          f"missing {missing} (stale sources?). ALLOW_SHRINK=1 to override.")
+    # Keep the old file (and its `generated`) when nothing else changed, so a run
+    # with no new days doesn't commit a timestamp-only diff.
+    # (compare as JSON: `out` holds tuples and int keys where the file has lists/strings)
+    if {**prev, "generated": None} == {**json.loads(json.dumps(out)), "generated": None}:
+        print(f"{METHODS.relative_to(ROOT)} unchanged (through {max(out['through'].values())})")
+        return prev
     METHODS.write_text(json.dumps(out, separators=(",", ":")))
     print(f"Distilled -> {METHODS.relative_to(ROOT)}: enriched_n={out['enriched_n']:,}, "
           f"through={out['through']}")
