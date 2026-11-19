@@ -94,8 +94,9 @@ jobs:
         if: ${{ !inputs.skip_build }}
         run: python pipeline/build.py
 
-      # Submission-volume: refresh the current year straight from the live API
-      # (rewrites agg.json + the embedded DATA in dashboard.html/index.html).
+      # Submission-volume: rebuild the current year from the checkpoint fetch.py just
+      # wrote (no second ArcGIS pull unless its row count != the live count), then
+      # rewrite agg.json + the embedded DATA in dashboard.html/index.html.
       - name: Refresh submission volume
         if: ${{ !inputs.skip_build }}
         run: python pipeline/refresh_submission.py
