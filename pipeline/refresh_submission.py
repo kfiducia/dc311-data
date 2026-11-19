@@ -7,7 +7,10 @@ plus bulk_total + generated. The externally sampled *method* data
 (methods/source/origin/channel) is left untouched.
 
 Where each year's numbers come from:
-  * current year — pulled live from DC's ArcGIS API (as before).
+  * current year — read from the raw checkpoint fetch.py just wrote (CI runs it
+    first), including its DC-local `hour` column, as long as its row count equals
+    the live layer count; otherwise pulled live from ArcGIS as before. This used
+    to always re-download the year (~45 min of a ~95 min build).
   * past years with a raw checkpoint (data/raw/_all_<Y>.csv, 2016+) — year
     total / months / wards are recomputed from the checkpoint every run. fetch.py
     keeps those complete (it re-pulls any year whose live count changed), so a
@@ -129,20 +132,26 @@ def compute_year(records, year):
 
 
 def raw_year(year):
-    """(total, month_list, week_list, ward_list) for a past year from its raw
+    """(total, month_list, week_list, ward_list, hours) for a year from its raw
     checkpoint, or None if there is no checkpoint. Same UTC-date bucketing as
-    compute_year."""
+    compute_year. `hours` (DC-local hour-of-day) is None for a checkpoint written
+    before fetch.py added the `hour` column."""
     p = RAW / f"_all_{year}.csv"
     if not p.exists():
         return None
     days, wards = Counter(), Counter()
+    hours = [0] * 24
     with p.open(newline="") as fh:
-        for r in csv.DictReader(fh):
+        rd = csv.DictReader(fh)
+        has_hour = "hour" in (rd.fieldnames or [])
+        for r in rd:
             d = r["date"]
             if not d.startswith(f"{year}-"):
                 continue  # dateless / boundary rows, as in compute_year
             days[d] += 1
             wards[r["ward"].strip() or "Unknown"] += 1
+            if has_hour:
+                hours[int(r["hour"])] += 1
     months, weeks = Counter(), Counter()
     for d, n in days.items():
         months[d[:7]] += n
@@ -150,7 +159,7 @@ def raw_year(year):
         if iso.year == year:
             weeks[f"{year}-W{iso.week:02d}"] += n
     return (sum(days.values()), sorted(months.items()), sorted(weeks.items()),
-            sorted(wards.items(), key=lambda kv: -kv[1]))
+            sorted(wards.items(), key=lambda kv: -kv[1]), hours if has_hour else None)
 
 
 def set_year(agg, year, total, month_list, ward_list, hours=None):
@@ -181,9 +190,9 @@ def main():
         got = raw_year(y)
         if got is None:
             continue
-        total, month_list, week_list, ward_list = got
+        total, month_list, week_list, ward_list, raw_hours = got
         old = dict(agg["by_year"]).get(y)
-        hours = agg["hour_local_by_year"].get(str(y))
+        hours = raw_hours or agg["hour_local_by_year"].get(str(y))
         if not hours or abs(sum(hours) - total) > HOURS_TOL * total:
             print(f"  {y}: hour-of-day seed ({sum(hours or []):,}) is stale vs "
                   f"{total:,} — re-pulling from ArcGIS …")
@@ -208,8 +217,24 @@ def main():
             print(f"  {y}: {was} → {total:,} (from raw checkpoint)")
 
     print(f"Refreshing submission dashboard for {year} …")
-    recs = fetch_year_records(layers[year], year)
-    total, month_list, week_list, ward_list, hours = compute_year(recs, year)
+    # fetch.py has normally just pulled this year into its raw checkpoint (CI runs it
+    # first), with the hour column — so read that instead of downloading the whole
+    # year from ArcGIS a second time (~45 min). Only trust it if its row count still
+    # equals the live layer count (one returnCountOnly call); otherwise re-pull.
+    got = raw_year(year)
+    live = _get(f"{C.ARCGIS_SERVICE}/{layers[year]}/query",
+                {"where": "1=1", "returnCountOnly": "true", "f": "json"}).get("count")
+    p = RAW / f"_all_{year}.csv"
+    rows = sum(1 for _ in csv.reader(p.open(newline=""))) - 1 if p.exists() else None
+    if got and got[4] is not None and rows == live:
+        total, month_list, week_list, ward_list, hours = got
+        print(f"  {year}: from fetch.py's checkpoint ({rows:,} rows == live count)")
+    else:
+        print(f"  {year}: checkpoint unusable (rows={rows}, live={live}, "
+              f"hour column={'yes' if got and got[4] is not None else 'no'}) — "
+              "pulling from ArcGIS …")
+        recs = fetch_year_records(layers[year], year)
+        total, month_list, week_list, ward_list, hours = compute_year(recs, year)
     print(f"  {year}: {total:,} requests · {len(month_list)} months "
           f"(latest {month_list[-1][0]}={month_list[-1][1]:,})")
 

@@ -1,8 +1,11 @@
 """Pull ALL raw DC 311 records once per year from ArcGIS -> data/raw/_all_<year>.csv.
 
-One row per request:  date, resolved, lat, lon, ward, code, service, agency
+One row per request:  date, resolved, lat, lon, ward, code, service, agency, hour
   (ADDDATE, RESOLUTIONDATE, LATITUDE, LONGITUDE, WARD, SERVICECODE,
-   SERVICECODEDESCRIPTION, SERVICETYPECODEDESCRIPTION)
+   SERVICECODEDESCRIPTION, SERVICETYPECODEDESCRIPTION; `hour` = ADDDATE's hour in
+   DC local time, so refresh_submission.py's hour-of-day chart reads this file
+   instead of re-pulling the whole current year from ArcGIS. Files written before
+   it was added lack the column; every reader uses DictReader, so that's fine.)
 
 This single raw source feeds everything downstream (DCD10): build.py's radar
 filters it by SERVICECODE; smd.py's choropleth point-in-polygons the rows and
@@ -28,6 +31,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import config as C
 
@@ -43,7 +47,8 @@ FETCH_START_YEAR = 2016
 
 _FIELDS = ("ADDDATE,RESOLUTIONDATE,LATITUDE,LONGITUDE,WARD,"
            "SERVICECODE,SERVICECODEDESCRIPTION,SERVICETYPECODEDESCRIPTION")
-HEADER = ["date", "resolved", "lat", "lon", "ward", "code", "service", "agency"]
+HEADER = ["date", "resolved", "lat", "lon", "ward", "code", "service", "agency", "hour"]
+NY = ZoneInfo("America/New_York")
 
 
 def _get(url, params):
@@ -124,8 +129,8 @@ def _row(a):
     (our change token) and SMD's no-latlon bucket stays honest; build.py skips the
     dateless ones at read time."""
     ms = a.get("ADDDATE")
-    d = (datetime.fromtimestamp(ms / 1000, tz=timezone.utc).date().isoformat()
-         if ms else "")
+    added = datetime.fromtimestamp(ms / 1000, tz=timezone.utc) if ms else None
+    d = added.date().isoformat() if added else ""
     rms = a.get("RESOLUTIONDATE")
     resolved = (datetime.fromtimestamp(rms / 1000, tz=timezone.utc).date().isoformat()
                 if rms else "")
@@ -136,7 +141,8 @@ def _row(a):
             a.get("WARD") or "",
             (a.get("SERVICECODE") or "").strip(),
             (a.get("SERVICECODEDESCRIPTION") or "").strip(),
-            (a.get("SERVICETYPECODEDESCRIPTION") or "").strip())
+            (a.get("SERVICETYPECODEDESCRIPTION") or "").strip(),
+            added.astimezone(NY).hour if added else "")
 
 
 def fetch_year_all(layer_id, year):
@@ -152,6 +158,8 @@ def fetch_year_all(layer_id, year):
         return
     part = RAW / f"_all_{year}.csv.part"
     offset = 0
+    if part.exists() and part.open().readline().strip() != ",".join(HEADER):
+        part.unlink()  # written with an older HEADER: resuming would mix column layouts
     if part.exists():
         # resume at the last CLEAN page boundary; drop any partial tail page
         with part.open() as fh:
