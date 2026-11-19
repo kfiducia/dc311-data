@@ -96,44 +96,60 @@ python pipeline/guardrail.py
 # then serve the repo root: python -m http.server 8000
 ```
 
-### Manual — submission method/source data
+### Automated (weekly) — submission method/source data
 
-The submission **method / source** numbers (phone vs. mobile vs. web) are *not*
-part of the automated refresh: they come from externally-enriched CSVs in a
-separate local workspace (`pipeline/refresh_methods.py`, path via `SRC_DIR`),
-which CI doesn't have — running it without those CSVs would overwrite good method
-data with empties. Refresh them by hand when the enriched CSVs are updated:
+The submission **method / source** numbers (phone vs. mobile web vs. desktop vs.
+native app) come from DC's live 311 API, not ArcGIS, and refresh on their own
+schedule:
 
-```
-python pipeline/refresh_methods.py      # reads ~/github/home-rule-org/dc311/data
-```
+1. **`.github/workflows/methods.yml` (Sundays, 20:00 UTC)** runs on the homelab k3s
+   runner (`dc311-data-k3s`, homelab-gitops `apps/arc-runners.yaml`). DC's API is
+   behind Cloudflare bot management, and a home IP is what's known to work.
+   - `pipeline/enrich_sources.py` appends each new day's SRs to
+     `data/sources/<year>.csv`.
+   - `pipeline/refresh_methods.py --distill` rolls the CSVs up into
+     `data/methods.json`.
+   - Both are committed to `main`.
+2. **`refresh.yml` (Mondays)** splices `data/methods.json` into `agg.json` and the
+   dashboards (`--splice`). The dashboard footer shows "submission methods through
+   <date>".
 
-### Where the enrichment code lives (not in this repo)
+Properties:
+- **Append-only and resumable.** A day goes into `data/sources/<year>.done` only
+  after its rows are on disk, so a stopped run resumes at the next day and never
+  re-requests finished ones.
+- **Distill refuses to shrink a year.** A stale or partial CSV can't cut the
+  dashboard's numbers.
+- **A failure doesn't block anything.** A methods.yml failure (runner down, API
+  down) emails you, and Monday still deploys with the last committed
+  `methods.json`.
+- **Cost:** ~1 API call per 50 SRs, about 150 calls / 5 minutes a week.
 
-The scripts that build the enriched CSVs live **outside this repo, deliberately**:
-in the local, uncommitted workspace `~/github/home-rule-org/dc311/`. `scripts/`
-holds the code, `data/` holds the outputs (`dc311_sources_<year>.csv`, plus
-`_backups/`), and `NOTES.md` / `HANDOFF_ANALYSIS.md` document DC's API.
+Setup and escape hatches:
+- **API key:** repo secret `DC311_API_KEY`, the public key DC's own 311 app embeds.
+  It's never committed.
+- **Runner down:** `gh variable set METHODS_RUNNER --body ubuntu-latest` moves the
+  job to GitHub-hosted runners (which may be blocked by Cloudflare).
+- **Re-pull a day:** `REDO=YYYY-MM-DD YEARS=<y>`.
+- **Run it locally:**
+  `DC311_API_KEY=… python pipeline/enrich_sources.py && python pipeline/refresh_methods.py`
 
-| Script | What it does |
-|---|---|
-| `enrich_complete.py` | **The one to use.** Pages DC's live 311 API (`/311/v4/requests.json?start_date&end_date`, 50 rows per call) backward through each day to capture every SR the API serves. `YEARS=2026 python3 enrich_complete.py`; `DAY_STRIDE=n` samples every nth day. Resumable per day. |
-| `enrich_sources.py`, `enrich_daterange.py`, `enrich_2025_daterange.py` | Older sampling enrichers (N SR ids/day looked up one by one). Superseded. |
-| `dc311_download.py` | Bulk ArcGIS → `data/dc311_<year>.jsonl` (superseded here by `pipeline/fetch.py`). |
-| `aggregate_submissions.py` | The original aggregator that `pipeline/refresh_methods.py` copies its method logic from. |
+What `data/sources/` holds:
+- **2016–2025:** a frozen every-other-day capture (no `.done`, never re-pulled).
+- **2026 onward:** every day.
 
-Things to know before rebuilding (checked 2026-11-18):
-- **The API returns the full SR record.** That includes description, source/origin,
-  status and dates, ANC/SMD/ward, agency, SLA, closure reason and `media_url`
-  (reporter contact is redacted). `enrich_complete.py` keeps only 6 of those
-  columns, so for full detail, change its `writerow` to dump the whole JSON.
+The original exploratory scripts and API notes are still in the local workspace
+`~/github/home-rule-org/dc311/` (`NOTES.md`, `HANDOFF_ANALYSIS.md`).
+
+Things to know about the API (checked 2026-11-18):
+- **It returns the full SR record.** That includes description, status and dates,
+  ANC/SMD/ward, agency, SLA, closure reason and `media_url` (reporter contact is
+  redacted). We keep only 6 columns.
 - **It serves only about half of ArcGIS, and the gap is by request type.** It
   isn't random, and it isn't the pager. See "Why the API has gaps" below.
-- **Cost:** ~16 calls / ~45 s per day, so ~4–5 h per year. Keep it sequential;
-  ~8 concurrent requests get a 403. It needs a browser User-Agent (Cloudflare).
-- **2025 now resolves.** `NOTES.md`'s "2025 gap" is out of date.
-- **The API key is the public one DC's own 311 app embeds.** It's in the scripts.
-  Don't commit it here, because this repo is public.
+- **Keep it sequential.** ~8 concurrent requests get a 403, and it needs a browser
+  User-Agent.
+- **2025 resolves.** `NOTES.md`'s "2025 gap" is out of date.
 
 #### Why the API has gaps
 

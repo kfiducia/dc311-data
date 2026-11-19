@@ -15,11 +15,12 @@ name: Refresh dashboard data
 #     when `generated` changes. A deploy-only run (skip_build) publishes WITHOUT
 #     agg/rats/ (it's never committed); the consumer keeps its last good copy.
 #
-# NOT built here (kept as committed source, refreshed manually — see README):
-#   * submission METHOD/source numbers — derived from external snap311 CSVs that
-#     CI doesn't have (refresh_methods.py). They live in the committed agg.json
-#     seed + inline dashboard DATA; refresh_submission only touches volume, so the
-#     method data is preserved.
+# Spliced in, NOT pulled here:
+#   * submission METHOD/source numbers — pulled from DC's live 311 API by
+#     methods.yml (Sundays, homelab k3s runner) and committed as data/methods.json.
+#     This run only splices that file into agg.json + the dashboards
+#     (refresh_methods.py --splice), so this job stays the only writer of agg.json
+#     and a methods.yml outage never blocks a deploy.
 #
 # Cadence: weekly, so the abatement coordinator's rat history stays within about a
 # week of DC. Raw checkpoints are only COMMITTED on the first run of each month
@@ -99,6 +100,12 @@ jobs:
         if: ${{ !inputs.skip_build }}
         run: python pipeline/refresh_submission.py
 
+      # Submission methods: splice the committed data/methods.json (written by
+      # methods.yml on Sundays) into agg.json + the dashboards' embedded DATA.
+      - name: Splice submission methods
+        if: ${{ !inputs.skip_build }}
+        run: python pipeline/refresh_methods.py --splice
+
       # Complaint categories + per-ward anomaly board.
       - name: Build complaint-category breakdown
         if: ${{ !inputs.skip_build }}
@@ -168,10 +175,13 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/raw agg.json dashboard.html export_by_year.csv export_by_month.csv
+          git add data/raw agg.json dashboard.html export_by_year.csv export_by_month.csv \
+            export_source_counts.csv export_origin_counts.csv export_channel_counts.csv
           if git diff --cached --quiet; then
             echo "No raw-data changes to commit."
           else
             git commit -m "chore(data): refresh raw 311 checkpoints + volume seed (current year)"
+            # methods.yml may have pushed data/sources since checkout (no shared files)
+            git pull --rebase --quiet origin main
             git push origin HEAD:main
           fi

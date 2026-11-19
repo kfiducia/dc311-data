@@ -1,29 +1,33 @@
 """Refresh the submission dashboard's SOURCE/METHOD numbers from the enriched
-DC 311 CSVs, without touching the (separately-refreshed) volume data.
+DC 311 CSVs (data/sources/<year>.csv, from enrich_sources.py), without touching
+the (separately-refreshed) volume data.
 
-The canonical aggregator (home-rule-org/dc311/scripts/aggregate_submissions.py) streams 4.3 GB of
-bulk jsonl for volume AND reads the small enriched CSVs for source/method. Volume
-is already refreshed live by refresh_submission.py, so here we reproduce ONLY the
-method half — verbatim logic — and splice the fresh method fields into agg.json +
-the embedded dashboards. Fast (CSVs only).
+Two halves, so the weekly volume build stays the only writer of agg.json:
+  --distill  CSVs -> data/methods.json (committed). Run by methods.yml on the
+             homelab k3s runner right after enrich_sources.py. Refuses to write
+             if any year's count would shrink (a stale/partial CSV).
+  --splice   data/methods.json -> agg.json method fields + the export CSVs + the
+             embedded DATA in the dashboards. Run by refresh.yml after
+             refresh_submission.py. No methods.json = leave agg.json as-is.
+  (none)     both, for a local run.
 
-Enriched CSVs (and the scripts that build them, enrich_complete.py et al.) live
-in the local, uncommitted ~/github/home-rule-org/dc311 workspace; see the README's
-"Where the enrichment code lives". Override the data dir with SRC_DIR.
+The method aggregation is verbatim from the original aggregator
+(home-rule-org/dc311/scripts/aggregate_submissions.py). Override the CSV dir
+with SRC_DIR.
 """
 import csv
-import glob
 import json
 import os
 import re
+import sys
 from collections import Counter, defaultdict
-from datetime import date as _date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC_DIR = Path(os.environ.get(
-    "SRC_DIR", Path.home() / "github" / "home-rule-org" / "dc311" / "data"))
+SRC_DIR = Path(os.environ.get("SRC_DIR", ROOT / "data" / "sources"))
+METHODS = ROOT / "data" / "methods.json"
 DC_TZ = ZoneInfo("America/New_York")
 
 # ---- method aggregation (verbatim from aggregate_submissions.py) ----------
@@ -103,11 +107,6 @@ def serialize_methods(agg):
     }
 
 
-def file_year(path):
-    m = re.search(r"dc311_sources_(\d{4})", os.path.basename(path))
-    return m.group(1) if m else None
-
-
 def max_date(fp):
     mx = ""
     with open(fp) as fh:
@@ -118,30 +117,15 @@ def max_date(fp):
     return mx
 
 
-def fresh_complete(fp, year, today):
-    mx = max_date(fp)
-    if not mx:
-        return False
-    target = min(_date(int(year), 12, 31), today)
-    return (target - _date.fromisoformat(mx)).days <= 3
-
-
-def main():
-    today = datetime.now(timezone.utc).date()
-    fresh = {file_year(fp): fp for fp in sorted(glob.glob(str(SRC_DIR / "dc311_sources_*.csv"))) if file_year(fp)}
-    old = {file_year(fp): fp for fp in sorted(glob.glob(str(SRC_DIR / "_backups" / "dc311_sources_*_old.csv"))) if file_year(fp)}
-    src_by_year, old_year_set = {}, set()
-    for y in sorted(set(fresh) | set(old)):
-        if y in fresh and fresh_complete(fresh[y], y, today):
-            src_by_year[y] = fresh[y]
-        elif y in old:
-            src_by_year[y] = old[y]; old_year_set.add(y)
-        elif y in fresh:
-            src_by_year[y] = fresh[y]
-
+def distill():
+    """CSVs -> the method fields (+ provenance), refusing to shrink any year."""
+    src = {m.group(1): fp for fp in sorted(SRC_DIR.glob("*.csv"))
+           if (m := re.fullmatch(r"(\d{4})\.csv", fp.name))}
+    if not src:
+        raise SystemExit(f"no <year>.csv files in {SRC_DIR}")
     years = defaultdict(new_year_agg)
     allyr = new_year_agg()
-    for y, fp in sorted(src_by_year.items()):
+    for y, fp in sorted(src.items()):
         with open(fp) as fh:
             for row in csv.DictReader(fh):
                 add_row(years[sr_year(row)], row)
@@ -149,16 +133,43 @@ def main():
 
     methods = {y: serialize_methods(a) for y, a in years.items()}
     methods["all"] = serialize_methods(allyr)
+    out = {
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "through": {y: max_date(fp) for y, fp in sorted(src.items())},
+        "method_years": sorted(y for y in methods if y != "all"),
+        "stale_method_years": [],
+        "methods": methods,
+        "enriched_n": allyr["enriched_n"],
+        "source_counts": allyr["source_counts"].most_common(),
+        "origin_counts": allyr["origin_counts"].most_common(),
+        "channel_counts": channel_counts_of(allyr).most_common(),
+    }
 
-    # ---- splice fresh method fields into the live-volume agg.json ----
+    # The captures are append-only, so a year never legitimately loses rows. A
+    # drop means a stale or partial CSV (2026-07: a refresh read a machine's
+    # older copy and would have cut 2026 from 134k to 116k). Refuse it.
+    prev = json.loads(METHODS.read_text()) if METHODS.exists() else \
+        json.loads((ROOT / "agg.json").read_text())
+    shrunk = {y: (m["enriched_n"], methods[y]["enriched_n"])
+              for y, m in prev.get("methods", {}).items()
+              if y in methods and methods[y]["enriched_n"] < m["enriched_n"]}
+    missing = sorted(set(prev.get("method_years", [])) - set(out["method_years"]))
+    if (shrunk or missing) and not os.environ.get("ALLOW_SHRINK"):
+        raise SystemExit(f"refusing to write {METHODS.name}: years shrank {shrunk} / "
+                         f"missing {missing} (stale sources?). ALLOW_SHRINK=1 to override.")
+    METHODS.write_text(json.dumps(out, separators=(",", ":")))
+    print(f"Distilled -> {METHODS.relative_to(ROOT)}: enriched_n={out['enriched_n']:,}, "
+          f"through={out['through']}")
+    return out
+
+
+def splice(m):
+    """Write the method fields into agg.json, the export CSVs and the embedded DATA."""
     agg = json.loads((ROOT / "agg.json").read_text())
-    agg["method_years"] = sorted(y for y in methods if y != "all")
-    agg["stale_method_years"] = sorted(old_year_set)
-    agg["methods"] = methods
-    agg["enriched_n"] = allyr["enriched_n"]
-    agg["source_counts"] = allyr["source_counts"].most_common()
-    agg["origin_counts"] = allyr["origin_counts"].most_common()
-    agg["channel_counts"] = channel_counts_of(allyr).most_common()
+    for k in ("method_years", "stale_method_years", "methods", "enriched_n",
+              "source_counts", "origin_counts", "channel_counts"):
+        agg[k] = m[k]
+    agg["methods_through"] = max(m["through"].values())
     agg["generated"] = datetime.now(timezone.utc).isoformat()
     (ROOT / "agg.json").write_text(json.dumps(agg, separators=(",", ":")))
 
@@ -182,8 +193,23 @@ def main():
                 print(f"  updated embedded DATA in {fn}")
                 break
 
-    print(f"Done. enriched_n={agg['enriched_n']:,}, method_years={agg['method_years']}")
-    print(f"  2026 sources: {methods.get('2026', {}).get('source_counts', [])[:6]}")
+    print(f"Spliced: enriched_n={agg['enriched_n']:,}, methods through "
+          f"{agg['methods_through']}, method_years={agg['method_years']}")
+
+
+def main():
+    mode = sys.argv[1] if len(sys.argv) > 1 else ""
+    if mode == "--distill":
+        distill()
+    elif mode == "--splice":
+        if not METHODS.exists():
+            print(f"no {METHODS.relative_to(ROOT)} — keeping agg.json's method data as-is")
+            return
+        splice(json.loads(METHODS.read_text()))
+    elif mode == "":
+        splice(distill())
+    else:
+        sys.exit(f"usage: {sys.argv[0]} [--distill | --splice]")
 
 
 if __name__ == "__main__":
