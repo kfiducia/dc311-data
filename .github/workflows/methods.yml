@@ -1,0 +1,92 @@
+name: Refresh submission methods
+
+# Pulls each new day's SR source/origin (phone / web / app …) from DC's live 311
+# API and distills it into data/methods.json, which the Monday refresh.yml build
+# splices into agg.json + the dashboards. Commits data/sources/ + methods.json to
+# main every run (the CSVs are append-only, so each commit is a small delta), so
+# the next run resumes where this one stopped and never re-requests a finished day.
+#
+# Runs on the homelab k3s runner (homelab-gitops apps/arc-runners.yaml,
+# scale set dc311-data-k3s), NOT GitHub-hosted: DC's API sits behind Cloudflare
+# bot management and a home IP is what's known to work. Escape hatch if the
+# runner is down: gh variable set METHODS_RUNNER --body ubuntu-latest
+#
+# Decoupled from refresh.yml on purpose: if the runner or DC's API is down, this
+# job fails (you get the email) and Monday's deploy still ships, using the last
+# committed methods.json.
+#
+# Security: this is a PUBLIC repo with a self-hosted runner. Only schedule and
+# manual triggers here — never pull_request — and the repo requires approval for
+# every outside contributor's workflow runs (fork-pr-contributor-approval =
+# all_external_contributors), so a fork PR can't run code on the runner.
+
+on:
+  schedule:
+    - cron: "0 20 * * 0" # Sunday 20:00 UTC, ahead of Monday's 08:00 refresh.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: methods
+  cancel-in-progress: false
+
+jobs:
+  enrich:
+    runs-on: ${{ vars.METHODS_RUNNER || 'dc311-data-k3s' }}
+    timeout-minutes: 60
+    steps:
+      # Only what the job reads/writes — skips the ~500 MB of data/raw checkpoints.
+      # (Cone mode also brings root files, e.g. agg.json, and files directly in
+      # data/, e.g. methods.json.)
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            pipeline
+            data/sources
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ~7 new days a week (~150 calls, ~5 min). MAX_MINUTES stops cleanly between
+      # days well inside the job timeout; the next run resumes from data/sources/*.done.
+      - name: Pull new days from DC's 311 API
+        id: enrich
+        continue-on-error: true
+        env:
+          DC311_API_KEY: ${{ secrets.DC311_API_KEY }}
+          MAX_MINUTES: "40"
+        run: python pipeline/enrich_sources.py
+
+      # Runs even if the pull failed part-way: only fully captured days are in the
+      # .done ledgers, so what's on disk is consistent. Refuses to write if any
+      # year's count would shrink.
+      - name: Distill data/methods.json
+        run: python pipeline/refresh_methods.py --distill
+
+      - name: Commit captured days + methods.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/sources data/methods.json
+          if git diff --cached --quiet; then
+            echo "Nothing new to commit."
+            exit 0
+          fi
+          through=$(python -c "import json;print(max(json.load(open('data/methods.json'))['through'].values()))")
+          git commit -m "chore(data): submission methods through ${through}"
+          for i in 1 2 3; do
+            git pull --rebase --quiet origin main && git push origin HEAD:main && exit 0
+            sleep 10
+          done
+          exit 1
+
+      - name: Fail if the API pull failed
+        if: ${{ steps.enrich.outcome == 'failure' }}
+        run: |
+          echo "::error::enrich_sources.py failed — progress up to the last full day was committed; rerun to resume."
+          exit 1

@@ -662,6 +662,7 @@ document.getElementById('note').innerHTML =
   var gen = (DATA.generated || '').slice(0, 10);
   var bits = [];
   if (through) bits.push('Volume data through ' + through);
+  if (DATA.methods_through) bits.push('submission methods through ' + DATA.methods_through);
   if (gen) bits.push('last refreshed ' + gen);
   el.textContent = bits.join(' · ');
 })();
