@@ -182,7 +182,9 @@ jobs:
             echo "No raw-data changes to commit."
           else
             git commit -m "chore(data): refresh raw 311 checkpoints + volume seed (current year)"
-            # methods.yml may have pushed data/sources since checkout (no shared files)
-            git pull --rebase --quiet origin main
+            # methods.yml may have pushed data/sources since checkout (no shared files).
+            # --autostash: the build leaves uncommitted generated files (agg/*.json, …),
+            # and a plain `pull --rebase` refuses to run over them (failed 2026-11-19).
+            git pull --rebase --autostash --quiet origin main
             git push origin HEAD:main
           fi
