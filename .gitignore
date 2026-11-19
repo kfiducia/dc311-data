@@ -10,8 +10,6 @@ __pycache__/
 data/raw/*_reports.csv
 # in-progress fetch pages (resumable); only the atomically-renamed final is tracked
 data/raw/*.part
-# Full SR detail pulls (pipeline/sr_detail.py) — ~90 MB/yr gzipped, local only.
-data/detail/
 # Rat-report export (pipeline/rats.py) — built in CI and published to Pages only,
 # never committed (~10 MB, rebuilt weekly).
 agg/rats/

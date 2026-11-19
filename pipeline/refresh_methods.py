@@ -1,13 +1,15 @@
 """Refresh the submission dashboard's SOURCE/METHOD numbers from the enriched
 DC 311 CSVs, without touching the (separately-refreshed) volume data.
 
-The canonical aggregator (snap311/.../aggregate_submissions.py) streams 4.3 GB of
+The canonical aggregator (home-rule-org/dc311/scripts/aggregate_submissions.py) streams 4.3 GB of
 bulk jsonl for volume AND reads the small enriched CSVs for source/method. Volume
 is already refreshed live by refresh_submission.py, so here we reproduce ONLY the
 method half — verbatim logic — and splice the fresh method fields into agg.json +
 the embedded dashboards. Fast (CSVs only).
 
-Enriched CSVs live in the snap311 analysis workspace; override with SRC_DIR.
+Enriched CSVs (and the scripts that build them, enrich_complete.py et al.) live
+in the local, uncommitted ~/github/home-rule-org/dc311 workspace; see the README's
+"Where the enrichment code lives". Override the data dir with SRC_DIR.
 """
 import csv
 import glob
@@ -21,7 +23,7 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = Path(os.environ.get(
-    "SRC_DIR", "/Users/kfiducia/GitHub/snap311/dc311/dc311/data"))
+    "SRC_DIR", Path.home() / "github" / "home-rule-org" / "dc311" / "data"))
 DC_TZ = ZoneInfo("America/New_York")
 
 # ---- method aggregation (verbatim from aggregate_submissions.py) ----------

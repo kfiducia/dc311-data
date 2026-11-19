@@ -105,25 +105,73 @@ which CI doesn't have — running it without those CSVs would overwrite good met
 data with empties. Refresh them by hand when the enriched CSVs are updated:
 
 ```
-SRC_DIR=/path/to/snap311/.../data python pipeline/refresh_methods.py
+python pipeline/refresh_methods.py      # reads ~/github/home-rule-org/dc311/data
 ```
 
-### Manual — full SR detail
+### Where the enrichment code lives (not in this repo)
 
-`pipeline/sr_detail.py` pulls the **full record** of every request (description,
-source/origin, ANC/SMD, SLA, closure reason, `media_url`, …) from DC's live 311
-API into `data/detail/<year>/<date>.jsonl.gz` (gitignored, ~90 MB/year). It
-defaults to the trailing 365 days, takes ~4–5 hours per year (sequential —
-the API 403s under concurrency), and resumes where it stopped. Needs
-`DC311_API_KEY` (the public key DC's own 311 app embeds; kept out of this public
-repo). The API serves only about **half** of the SRs in ArcGIS — whole service
-types (parking enforcement, DMV, info calls, yard waste, …) never appear, even
-by id.
+The scripts that build the enriched CSVs live **outside this repo, deliberately**:
+in the local, uncommitted workspace `~/github/home-rule-org/dc311/`. `scripts/`
+holds the code, `data/` holds the outputs (`dc311_sources_<year>.csv`, plus
+`_backups/`), and `NOTES.md` / `HANDOFF_ANALYSIS.md` document DC's API.
 
-```
-DC311_API_KEY=… python pipeline/sr_detail.py                        # last 365 days
-DC311_API_KEY=… python pipeline/sr_detail.py 2025-01-01 2025-12-31
-```
+| Script | What it does |
+|---|---|
+| `enrich_complete.py` | **The one to use.** Pages DC's live 311 API (`/311/v4/requests.json?start_date&end_date`, 50 rows per call) backward through each day to capture every SR the API serves. `YEARS=2026 python3 enrich_complete.py`; `DAY_STRIDE=n` samples every nth day. Resumable per day. |
+| `enrich_sources.py`, `enrich_daterange.py`, `enrich_2025_daterange.py` | Older sampling enrichers (N SR ids/day looked up one by one). Superseded. |
+| `dc311_download.py` | Bulk ArcGIS → `data/dc311_<year>.jsonl` (superseded here by `pipeline/fetch.py`). |
+| `aggregate_submissions.py` | The original aggregator that `pipeline/refresh_methods.py` copies its method logic from. |
+
+Things to know before rebuilding (checked 2026-11-18):
+- **The API returns the full SR record.** That includes description, source/origin,
+  status and dates, ANC/SMD/ward, agency, SLA, closure reason and `media_url`
+  (reporter contact is redacted). `enrich_complete.py` keeps only 6 of those
+  columns, so for full detail, change its `writerow` to dump the whole JSON.
+- **It serves only about half of ArcGIS, and the gap is by request type.** It
+  isn't random, and it isn't the pager. See "Why the API has gaps" below.
+- **Cost:** ~16 calls / ~45 s per day, so ~4–5 h per year. Keep it sequential;
+  ~8 concurrent requests get a 403. It needs a browser User-Agent (Cloudflare).
+- **2025 now resolves.** `NOTES.md`'s "2025 gap" is out of date.
+- **The API key is the public one DC's own 311 app embeds.** It's in the scripts.
+  Don't commit it here, because this repo is public.
+
+#### Why the API has gaps
+
+The live API returned 115,645 SRs for 2026-01-01..06-17, vs 232,607 in
+ArcGIS for the same days (49.7%). The gap is almost entirely **which request type
+it is**:
+
+- **60 service types are never served (0%).** That's 106k SRs, about 46% of
+  ArcGIS. Largest: Parking Enforcement (26.6k), Scheduled Yard Waste (16.7k),
+  DC Government Information (15.8k), Snow & Ice Removal on Public Space (9.3k),
+  Residential Parking Permit Violation (7.1k), Sanitation Enforcement (6.3k),
+  Snow Hero / ServeDC (4.5k), ROSA out-of-state parking (3.6k), Abandoned
+  Vehicle on public property, Dockless Vehicle Parking, Missed Compost, DMV.
+- **50 types are served essentially in full (≥90%, most 99–100%).** That's 110k
+  SRs: bulk, missed trash and recycling, potholes, signals, signs, trees,
+  sidewalks, dead animals, and so on.
+- **Rodents (S0311) and Illegal Dumping (S0181) switch on in mid-2026.** Both
+  are 0% before ~2026-05-01 (dumping from 04-30) and ~99–100% after. That makes
+  their half-year numbers look partial (41% / 34%).
+- **The missing SRs don't exist in the API at all.** Pre-cutover rodent and
+  dumping ids, and sampled parking/yard-waste/DMV ids, all return an empty array
+  when looked up by `service_request_id`. So no pager or query change can
+  recover them.
+
+The most likely explanation (an inference, not confirmed with DC) is that this
+API only fronts requests handled in DC's current Salesforce system. Agency
+types routed to other systems (parking enforcement and DMV, info calls,
+seasonal yard waste and snow programs) never land there, and rodent and dumping
+moved over at the 2026-05-01 cutover. That's the same date the native-app
+`source` step-change question in `submission_methods.md` centres on. In
+practice:
+
+- **Method/source shares describe only the served types.** They are not all of
+  311. Phone-heavy types like DC Government Information and parking are absent.
+- **Compare a type only over spans where its coverage is flat.** Rodent and
+  dumping data from the API is usable from 2026-05-01 on.
+- **Re-check before reusing these numbers.** Coverage is a moving target as DC
+  migrates types: rerun the per-`service_code` API-vs-ArcGIS comparison.
 
 Cadence is **weekly**, so the abatement coordinator's rat history stays within
 about a week of DC. Raw checkpoints are still committed only **once a month**
