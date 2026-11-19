@@ -108,6 +108,23 @@ data with empties. Refresh them by hand when the enriched CSVs are updated:
 SRC_DIR=/path/to/snap311/.../data python pipeline/refresh_methods.py
 ```
 
+### Manual — full SR detail
+
+`pipeline/sr_detail.py` pulls the **full record** of every request (description,
+source/origin, ANC/SMD, SLA, closure reason, `media_url`, …) from DC's live 311
+API into `data/detail/<year>/<date>.jsonl.gz` (gitignored, ~90 MB/year). It
+defaults to the trailing 365 days, takes ~4–5 hours per year (sequential —
+the API 403s under concurrency), and resumes where it stopped. Needs
+`DC311_API_KEY` (the public key DC's own 311 app embeds; kept out of this public
+repo). The API serves only about **half** of the SRs in ArcGIS — whole service
+types (parking enforcement, DMV, info calls, yard waste, …) never appear, even
+by id.
+
+```
+DC311_API_KEY=… python pipeline/sr_detail.py                        # last 365 days
+DC311_API_KEY=… python pipeline/sr_detail.py 2025-01-01 2025-12-31
+```
+
 Cadence is **weekly**, so the abatement coordinator's rat history stays within
 about a week of DC. Raw checkpoints are still committed only **once a month**
 (scheduled runs in the month's first week; manual runs always commit) to keep the
