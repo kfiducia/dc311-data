@@ -20,9 +20,6 @@ Run:  cd pipeline && ./.venv/bin/python smd.py
 import csv
 import json
 import sys
-import time
-import urllib.parse
-import urllib.request
 from collections import Counter
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -30,6 +27,7 @@ from pathlib import Path
 import shapely
 from shapely.geometry import Point, mapping, shape
 
+import arcgis_client as A
 import config as C
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -63,19 +61,6 @@ BOUNDARY_COORD_PRECISION = 5
 
 # csv default field-size limit is too small for the occasional long attribute
 csv.field_size_limit(10 * 1024 * 1024)
-
-
-def _get(url, params):
-    q = urllib.parse.urlencode(params)
-    for attempt in range(6):
-        try:
-            with urllib.request.urlopen(f"{url}?{q}", timeout=120) as r:
-                return json.load(r)
-        except Exception as e:  # noqa: BLE001 - simple retry
-            if attempt == 5:
-                raise
-            print(f"  retry {attempt+1} ({e})", file=sys.stderr)
-            time.sleep(3 * (attempt + 1))
 
 
 def _round_coords(obj, nd):
@@ -120,7 +105,7 @@ def load_smd_polygons():
         gj = json.loads(cache.read_text())
         print(f"SMD boundaries: cached ({len(gj['features'])} features)", file=sys.stderr)
     else:
-        gj = _get(f"{SMD_LAYER}/query", {
+        gj = A.get(f"{SMD_LAYER}/query", {
             "where": "1=1",
             "outFields": "SMD_ID,ANC_ID,NAME",
             "returnGeometry": "true",

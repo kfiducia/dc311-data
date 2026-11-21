@@ -13,30 +13,15 @@ them. Run:  ./.venv/bin/python pipeline/anomaly.py
 """
 import json
 import sys
-import time
-import urllib.parse
-import urllib.request
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+import arcgis_client as A
 import config as C
 
 ROOT = Path(__file__).resolve().parent.parent
 WARDS = [f"Ward {i}" for i in range(1, 9)]
-
-
-def _get(url, params):
-    q = urllib.parse.urlencode(params)
-    for attempt in range(6):
-        try:
-            with urllib.request.urlopen(f"{url}?{q}", timeout=120) as r:
-                return json.load(r)
-        except Exception as e:  # noqa: BLE001
-            if attempt == 5:
-                raise
-            print(f"  retry {attempt+1} ({e})", file=sys.stderr)
-            time.sleep(3 * (attempt + 1))
 
 
 def months_since(start_year):
@@ -62,11 +47,11 @@ def month_bounds(y, m):
 def labels_map():
     """{code: description} from the latest year layer."""
     lid = C._latest_layer()
-    res = _get(f"{C.ARCGIS_SERVICE}/{lid}/query",
-               {"where": "1=1", "groupByFieldsForStatistics": "SERVICECODE,SERVICECODEDESCRIPTION",
-                "outStatistics": json.dumps([{"statisticType": "count",
-                                              "onStatisticField": "SERVICECODE",
-                                              "outStatisticFieldName": "CNT"}]), "f": "json"})
+    res = A.get(f"{C.ARCGIS_SERVICE}/{lid}/query",
+                {"where": "1=1", "groupByFieldsForStatistics": "SERVICECODE,SERVICECODEDESCRIPTION",
+                 "outStatistics": json.dumps([{"statisticType": "count",
+                                               "onStatisticField": "SERVICECODE",
+                                               "outStatisticFieldName": "CNT"}]), "f": "json"})
     return {f["attributes"]["SERVICECODE"]: f["attributes"].get("SERVICECODEDESCRIPTION")
             for f in res.get("features", []) if f["attributes"].get("SERVICECODE")}
 
@@ -75,11 +60,11 @@ def fetch_month(lid, y, m):
     """{(ward, code): count} for one month."""
     start, end = month_bounds(y, m)
     where = f"ADDDATE >= timestamp '{start}' AND ADDDATE < timestamp '{end}'"
-    res = _get(f"{C.ARCGIS_SERVICE}/{lid}/query",
-               {"where": where, "groupByFieldsForStatistics": "WARD,SERVICECODE",
-                "outStatistics": json.dumps([{"statisticType": "count",
-                                              "onStatisticField": "WARD",
-                                              "outStatisticFieldName": "CNT"}]), "f": "json"})
+    res = A.get(f"{C.ARCGIS_SERVICE}/{lid}/query",
+                {"where": where, "groupByFieldsForStatistics": "WARD,SERVICECODE",
+                 "outStatistics": json.dumps([{"statisticType": "count",
+                                               "onStatisticField": "WARD",
+                                               "outStatisticFieldName": "CNT"}]), "f": "json"})
     out = {}
     for f in res.get("features", []):
         a = f["attributes"]
@@ -90,20 +75,8 @@ def fetch_month(lid, y, m):
     return out
 
 
-def year_layers():
-    meta = _get(C.ARCGIS_SERVICE, {"f": "json"})
-    out = {}
-    for lyr in meta["layers"]:
-        n = lyr["name"]
-        if n.startswith("All Service Requests - "):
-            t = n.rsplit("-", 1)[-1].strip()
-            if t.isdigit():
-                out[int(t)] = lyr["id"]
-    return out
-
-
 def main():
-    layers = year_layers()
+    layers = A.year_layers()
     labels = labels_map()
     exclude = set(C.EXCLUDE_CODES)
 
