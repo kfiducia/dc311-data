@@ -37,6 +37,7 @@ import shapely
 from shapely.geometry import MultiPolygon, Point, mapping, shape
 from shapely.ops import unary_union
 
+import arcgis_client as A
 import smd as S
 
 SCHEMA = 1
@@ -102,7 +103,7 @@ def fetch_squares():
     replacements) as (id, shapely geometry, area_m2)."""
     feats, offset = [], 0
     while True:
-        gj = S._get(f"{SQUARE_LAYER}/query", {
+        gj = A.get(f"{SQUARE_LAYER}/query", {
             "where": "KILL_DT IS NULL",
             "outFields": "SQUARE,SUFFIX",
             "returnGeometry": "true",

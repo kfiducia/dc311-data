@@ -25,14 +25,12 @@ no reliable lastEditDate/ETag).
 import csv
 import json
 import sys
-import time
-import urllib.parse
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import arcgis_client as A
 import config as C
 
 RAW = Path(__file__).resolve().parent.parent / "data" / "raw"
@@ -51,45 +49,12 @@ HEADER = ["date", "resolved", "lat", "lon", "ward", "code", "service", "agency",
 NY = ZoneInfo("America/New_York")
 
 
-def _get(url, params):
-    q = urllib.parse.urlencode(params)
-    for attempt in range(6):
-        try:
-            with urllib.request.urlopen(f"{url}?{q}", timeout=120) as r:
-                data = json.load(r)
-            # ArcGIS reports failures as HTTP 200 + an "error" body with no
-            # features; the pager would read that as end-of-data and rename a
-            # truncated .part to final — and since source_counts.json then records
-            # the live count, that year would never be re-fetched (DCD16).
-            if "error" in data:
-                raise RuntimeError(f"ArcGIS error: {data['error']}")
-            return data
-        except Exception as e:  # noqa: BLE001 - simple retry
-            if attempt == 5:
-                raise
-            print(f"  retry {attempt+1} ({e})", file=sys.stderr)
-            time.sleep(3 * (attempt + 1))
-
-
-def year_layers():
-    """Map each year -> layer id by parsing the MapServer's layer list."""
-    meta = _get(C.ARCGIS_SERVICE, {"f": "json"})
-    out = {}
-    for lyr in meta["layers"]:
-        name = lyr["name"]  # e.g. "All Service Requests - 2025"
-        if name.startswith("All Service Requests - "):
-            tail = name.rsplit("-", 1)[-1].strip()
-            if tail.isdigit():
-                out[int(tail)] = lyr["id"]
-    return out
-
-
 def year_counts(layers, years):
     """{year: total record count} via returnCountOnly — the per-year change token."""
     out = {}
     for y in years:
-        d = _get(f"{C.ARCGIS_SERVICE}/{layers[y]}/query",
-                 {"where": "1=1", "returnCountOnly": "true", "f": "json"})
+        d = A.get(f"{C.ARCGIS_SERVICE}/{layers[y]}/query",
+                  {"where": "1=1", "returnCountOnly": "true", "f": "json"})
         out[y] = d.get("count")
     return out
 
@@ -174,7 +139,7 @@ def fetch_year_all(layer_id, year):
     with part.open("a", newline="") as fh:
         w = csv.writer(fh)
         while True:
-            data = _get(
+            data = A.get(
                 f"{C.ARCGIS_SERVICE}/{layer_id}/query",
                 {"where": "1=1", "outFields": _FIELDS, "returnGeometry": "false",
                  "resultOffset": offset, "resultRecordCount": PAGE,
@@ -195,7 +160,7 @@ def fetch_year_all(layer_id, year):
 
 
 def main():
-    layers = year_layers()
+    layers = A.year_layers()
     years = sorted(y for y in layers if y >= FETCH_START_YEAR)
     refetch, live = changed_years(layers, years)
     # Force a fresh pull for years that changed / the current year: drop their final

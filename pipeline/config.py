@@ -52,15 +52,10 @@ def _slug(code):
 
 
 def _latest_layer():
-    meta = _json.load(_urlreq.urlopen(f"{ARCGIS_SERVICE}?f=json", timeout=120))
-    years = {}
-    for lyr in meta["layers"]:
-        n = lyr["name"]
-        if n.startswith("All Service Requests - "):
-            t = n.rsplit("-", 1)[-1].strip()
-            if t.isdigit():
-                years[int(t)] = lyr["id"]
-    return years[max(years)]
+    import arcgis_client as A  # local import: arcgis_client imports config, so this
+                                # would be circular at module load time
+    L = A.year_layers()
+    return L[max(L)]
 
 
 def resolve_signals():
