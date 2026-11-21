@@ -15,13 +15,11 @@ Run:  ./.venv/bin/python pipeline/categories.py   (idempotent)
 """
 import json
 import sys
-import time
-import urllib.parse
-import urllib.request
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+import arcgis_client as A
 import config as C
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -29,34 +27,9 @@ OTHER = "__other__"
 WARDS = [f"Ward {i}" for i in range(1, 9)]
 
 
-def _get(url, params):
-    q = urllib.parse.urlencode(params)
-    for attempt in range(6):
-        try:
-            with urllib.request.urlopen(f"{url}?{q}", timeout=120) as r:
-                return json.load(r)
-        except Exception as e:  # noqa: BLE001
-            if attempt == 5:
-                raise
-            print(f"  retry {attempt+1} ({e})", file=sys.stderr)
-            time.sleep(3 * (attempt + 1))
-
-
-def year_layers():
-    meta = _get(C.ARCGIS_SERVICE, {"f": "json"})
-    out = {}
-    for lyr in meta["layers"]:
-        name = lyr["name"]
-        if name.startswith("All Service Requests - "):
-            tail = name.rsplit("-", 1)[-1].strip()
-            if tail.isdigit():
-                out[int(tail)] = lyr["id"]
-    return out
-
-
 def fetch_year_matrix(layer_id):
     """One group-by request -> {(ward, code): count}, plus {code: description}."""
-    res = _get(
+    res = A.get(
         f"{C.ARCGIS_SERVICE}/{layer_id}/query",
         {"where": "1=1",
          "groupByFieldsForStatistics": "WARD,SERVICECODE,SERVICECODEDESCRIPTION",
@@ -83,7 +56,7 @@ def fetch_year_matrix(layer_id):
 
 
 def main():
-    layers = year_layers()
+    layers = A.year_layers()
     years = sorted(y for y in layers if y >= C.CATEGORY_START_YEAR)
     print(f"Building category cube for {years[0]}-{years[-1]} "
           f"({len(years)} year layers)…")

@@ -32,14 +32,12 @@ Run:  ./.venv/bin/python pipeline/refresh_submission.py
 import csv
 import json
 import sys
-import time
-import urllib.parse
-import urllib.request
 from collections import Counter, defaultdict
 from datetime import date, datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import arcgis_client as A
 import config as C
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -50,42 +48,11 @@ NY = ZoneInfo("America/New_York")
 HOURS_TOL = 0.01
 
 
-def _get(url, params):
-    q = urllib.parse.urlencode(params)
-    for attempt in range(6):
-        try:
-            with urllib.request.urlopen(f"{url}?{q}", timeout=120) as r:
-                data = json.load(r)
-            # ArcGIS reports failures (e.g. an overloaded server) as HTTP 200 with
-            # an "error" body and no features — which the pager would otherwise
-            # read as end-of-data and silently truncate the year.
-            if "error" in data:
-                raise RuntimeError(f"ArcGIS error: {data['error']}")
-            return data
-        except Exception as e:  # noqa: BLE001
-            if attempt == 5:
-                raise
-            print(f"  retry {attempt+1} ({e})", file=sys.stderr)
-            time.sleep(3 * (attempt + 1))
-
-
-def year_layers():
-    meta = _get(C.ARCGIS_SERVICE, {"f": "json"})
-    out = {}
-    for lyr in meta["layers"]:
-        name = lyr["name"]
-        if name.startswith("All Service Requests - "):
-            tail = name.rsplit("-", 1)[-1].strip()
-            if tail.isdigit():
-                out[int(tail)] = lyr["id"]
-    return out
-
-
 def fetch_year_records(layer_id, year):
     """All requests for the year: (utc_datetime, ward). Paginated."""
     rows, offset = [], 0
     while True:
-        data = _get(
+        data = A.get(
             f"{C.ARCGIS_SERVICE}/{layer_id}/query",
             {"where": "1=1", "outFields": "ADDDATE,WARD", "returnGeometry": "false",
              "resultOffset": offset, "resultRecordCount": 1000,
@@ -180,7 +147,7 @@ def set_year(agg, year, total, month_list, ward_list, hours=None):
 
 def main():
     agg = json.loads((ROOT / "agg.json").read_text())
-    layers = year_layers()
+    layers = A.year_layers()
     year = max(layers)  # current year
 
     # Past years: recompute from the (complete) raw checkpoints.
@@ -222,8 +189,8 @@ def main():
     # year from ArcGIS a second time (~45 min). Only trust it if its row count still
     # equals the live layer count (one returnCountOnly call); otherwise re-pull.
     got = raw_year(year)
-    live = _get(f"{C.ARCGIS_SERVICE}/{layers[year]}/query",
-                {"where": "1=1", "returnCountOnly": "true", "f": "json"}).get("count")
+    live = A.get(f"{C.ARCGIS_SERVICE}/{layers[year]}/query",
+                 {"where": "1=1", "returnCountOnly": "true", "f": "json"}).get("count")
     p = RAW / f"_all_{year}.csv"
     rows = sum(1 for _ in csv.reader(p.open(newline=""))) - 1 if p.exists() else None
     if got and got[4] is not None and rows == live:
