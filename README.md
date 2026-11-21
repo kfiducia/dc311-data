@@ -57,8 +57,8 @@ signal, edit `SIGNALS` in `pipeline/config.py`.
 Actions tab's **Run workflow** button). It pulls fresh data straight from DC's
 public ArcGIS API — no credentials needed — builds every artifact, sanity-gates
 them, then deploys the whole site straight to Pages (`upload-pages-artifact` +
-`deploy-pages`). Apart from the monthly commit described above, nothing is pushed
-back to `main`:
+`deploy-pages`). The built `agg/` data is never pushed back to `main`; only the raw
+input checkpoints and the small volume seed are (see below):
 
 ```
 python pipeline/fetch.py              # radar: every resolve_signals() service type + aux -> data/raw/
@@ -71,9 +71,16 @@ python pipeline/rats.py               # rat-report export for the abatement coor
 python pipeline/guardrail.py          # fail (=> no deploy, last-good site stays live) if a build is empty/degenerate
 ```
 
-The workflow caches the per-year checkpoint CSVs (`actions/cache` on `data/raw/`)
-and re-pulls only the current, still-growing year each run (radar via `fetch.py`,
-SMD via `smd.py`'s fetch manifest). `fetch.py` also re-pulls any past year whose
+The raw per-year checkpoint CSVs (`data/raw/_all_<year>.csv`) live **in git**, so
+every checkout already carries all prior years — no Actions cache. Each build run
+deletes only the current, still-growing year's checkpoints and re-pulls them
+(radar via `fetch.py`, SMD via `smd.py`'s fetch manifest); prior years are reused
+as-is. After a successful deploy, the workflow commits the refreshed `data/raw/`
+back to `main` ("Commit refreshed raw data" step, together with the volume seed
+described under Refresh) so the next run starts from it.
+To avoid bloating history, scheduled runs commit only in the first week of each
+month; manual runs always commit, and deploy-only (`skip_build`) runs never do.
+`fetch.py` also re-pulls any past year whose
 live count changed, and `refresh_submission.py` rebuilds every 2016+ year's volume
 from those checkpoints, so a year that was still growing when it was last refreshed
 gets finished. The guardrail fails the deploy if any past year's published total
