@@ -34,8 +34,13 @@ web, desktop web, native app) and submission-volume trends.
   close (ANC/ward/city only). State lives in the URL, so a view can be shared.
   `pipeline/area_trends.py` writes one ~25 KB file per area (~400 files, ~4.4 MB,
   built in CI and never committed); a page view loads 2–4 of them (~30 KB gzipped).
-  Areas use the 2023 SMD lines for every year; each SMD's ward comes from its
-  requests (ANC 3/4G spans Wards 3 and 4; 8F04/8F05 are in Ward 6)
+  Areas use the 2023 SMD lines for every year; each SMD's ward is the majority
+  WARD field of its requests since 2025-03 (earlier rows still carry the pre-2022
+  ward lines). Two ANCs span two wards: 3/4G (Wards 3 and 4) and 8F (Wards 6 and 8;
+  8F04/8F05 are in Ward 6). Months are bucketed by UTC date. In CI the area-trends
+  build runs after the rat export and can't block the deploy: if it (or its unit
+  tests or `guardrail.py --only area-trends`) fails, `agg/area_trends/` is left out
+  of that deploy and the rest of the site ships
 - `agg/rats/` — rat-report export for the
   [abatement coordinator](https://abatement.home-rule.org) (`pipeline/rats.py`):
   per-year rat reports with their SMD, per-SMD rankings, and city blocks with

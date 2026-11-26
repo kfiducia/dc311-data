@@ -18,11 +18,18 @@ and its ANC and ward come from that SMD, not from the request's own WARD field.
 So an SMD always adds up into its ANC and ward, and a trend line isn't bent by the
 2022 ward redistricting. "Citywide" is the sum of all SMDs.
 
-An SMD's ward is the most common WARD field among its 2023+ requests (already on
-the new ward lines), not the ANC id's digit. ANC 3/4G spans Wards 3 and 4, and
-SMDs 8F04/8F05 sit in Ward 6 despite their ANC's "8". Checked 2026-11-25 against
-DC GIS "Ward - 2022" (Administrative_Other_Boundaries MapServer/53) by polygon
-overlap: all 345 SMDs agree (3/4G01-04 -> Ward 4, 3/4G05-07 -> Ward 3).
+An SMD's ward is the most common WARD field among its requests opened since
+WARD_FIELD_FROM, not the ANC id's digit. Two ANCs span two wards: 3/4G (Wards 3
+and 4) and 8F (SMDs 8F04/8F05 sit in Ward 6 despite the ANC's "8"). Checked
+2026-11-25 against DC GIS "Ward - 2022" (Administrative_Other_Boundaries
+MapServer/53) by polygon overlap: all 345 SMDs agree (3/4G01-04 -> Ward 4,
+3/4G05-07 -> Ward 3). The window matters: DC's WARD field kept the OLD (pre-2022)
+ward lines through 2023 and much of 2024, so counting those years makes some
+border SMDs a near-tie (7D06 ~2:1). From 2025-03 every SMD's vote is >=95% one
+ward; the build logs any SMD below WARD_PURITY_WARN.
+
+Dates are UTC calendar dates (fetch.py converts DC's epoch timestamps in UTC), so
+a request filed late in the evening Eastern can land in the next day / month.
 
 Normalising: DC draws every SMD to about 2,000 residents, so dividing by an area's
 SMD count gives a rough per-resident rate without a population table. The page
@@ -56,7 +63,10 @@ import smd as S
 OUT = S.ROOT / "agg" / "area_trends"
 OTHER = "__other__"
 OPEN_DAYS = 10 ** 6         # sentinel for "not closed yet": sorts after every real duration
-WARD_FIELD_FROM = "2023-01-01"  # WARD field is on the 2022 (current) ward lines from here
+# DC's WARD field still used pre-2022 ward lines through 2023 and much of 2024;
+# from here on it matches the current lines (every SMD >=95% one ward).
+WARD_FIELD_FROM = "2025-03-01"
+WARD_PURITY_WARN = 0.80     # log an SMD whose ward vote is less one-sided than this
 CLOSE_LEVELS = ("city", "ward", "anc")   # levels that ship time-to-close
 
 csv.field_size_limit(10 * 1024 * 1024)
@@ -94,25 +104,31 @@ def default_ward(anc):
 
 
 def majority_ward(smd_idx, wards):
-    """{smd index: ward digit} = the most common non-blank ward among the rows
-    placed in each SMD (ties -> lowest ward). smd_idx is an int array (-1 =
-    unplaced); wards is a parallel list of ward digits ('' = unknown)."""
+    """{smd index: (ward digit, share)} = the most common non-blank ward among the
+    rows placed in each SMD (ties -> lowest ward) and the share of votes it got.
+    smd_idx is an int array (-1 = unplaced); wards is a parallel list of ward
+    digits ('' = unknown or outside the voting window)."""
     tally = {}
     for i, w in zip(smd_idx.tolist(), wards):
         if i >= 0 and w:
             tally.setdefault(i, Counter())[w] += 1
-    return {i: min(c, key=lambda w: (-c[w], w)) for i, c in tally.items()}
+    out = {}
+    for i, c in tally.items():
+        w = min(c, key=lambda k: (-c[k], k))
+        out[i] = (w, c[w] / sum(c.values()))
+    return out
 
 
 def resolve_wards(smd_ids, anc_of, majority):
     """Each SMD's ward: the majority of its requests' WARD field, falling back to
     the ANC id's digit for an SMD with no recent requests. Returns (ward_of,
     disagreements): SMDs whose ward differs from their ANC id's digit. Printed
-    for the log, not fatal: 8F04/8F05 (Ward 6) are real ones."""
+    for the log, not fatal: 8F04/8F05 (Ward 6) are real ones. `majority` is
+    majority_ward()'s {smd index: (ward, share)}."""
     ward_of, odd = {}, []
     for i, s in enumerate(smd_ids):
         d = default_ward(anc_of[s])
-        w = majority.get(i) or d
+        w = (majority.get(i) or (None,))[0] or d
         if w is None:   # multi-ward ANC with no recent requests: first ward it names
             w = re.match(r"[1-8]", anc_of[s]).group(0)
         if d and w != d:
@@ -224,14 +240,26 @@ def series(counts_row, med_row=None):
 # Build
 # --------------------------------------------------------------------------
 
-def read_rows(files, start_year):
+def is_partial_month(data_through):
+    """True unless data_through ('YYYY-MM-DD') is the last day of its month."""
+    d = date.fromisoformat(data_through)
+    return (d + timedelta(days=1)).month == d.month
+
+
+def read_rows(files, start_year, today=None):
     """Read every _all_<year>.csv once into flat arrays. Placeholder pins (a
     coordinate carrying > PLACEHOLDER_MAX_PER_YEAR requests in a year, smd.py's
-    rule) and rows without coordinates get NaN coordinates so they place nowhere."""
+    rule) and rows without coordinates get NaN coordinates so they place nowhere.
+
+    Rows opened after `today` (UTC; default: now) are skipped: one future-dated
+    row would otherwise push data_through ahead, add empty months and trip the
+    guardrail, blocking the whole weekly deploy."""
+    today = (today or datetime.now(timezone.utc).date()).isoformat()
     lat, lon, code, mon, days, ward = [], [], [], [], [], []
     code_ix, code_label = {}, {}
     ordinal = {}
     data_through = ""
+    future = 0
 
     def ordn(iso):
         o = ordinal.get(iso)
@@ -254,6 +282,9 @@ def read_rows(files, start_year):
             m = month_index(opened, start_year)
             if m < 0:
                 continue
+            if opened > today:
+                future += 1
+                continue
             kept += 1
             if opened > data_through:
                 data_through = opened
@@ -273,6 +304,10 @@ def read_rows(files, start_year):
             days.append(max(0, ordn(res) - ordn(opened)) if len(res) == 10 else OPEN_DAYS)
         print(f"  {y}: {kept:,} rows · {len(placeholders)} placeholder pins", file=sys.stderr)
 
+    if future:
+        print(f"  skipped {future:,} row(s) opened after {today} (future-dated)", file=sys.stderr)
+    if not data_through:
+        raise SystemExit("area_trends: no usable rows")
     codes = [None] * len(code_ix)
     for c, i in code_ix.items():
         codes[i] = c
@@ -297,8 +332,16 @@ def main():
     smd = assign_points(lat, lon, tree)
     print(f"  placed {(smd >= 0).sum():,} of {len(smd):,} requests in an SMD", file=sys.stderr)
 
-    ward_of, odd = resolve_wards(smd_ids, anc_of, majority_ward(smd, ward_field))
+    votes = majority_ward(smd, ward_field)
     del ward_field
+    ward_of, odd = resolve_wards(smd_ids, anc_of, votes)
+    weak = sorted((share, smd_ids[i]) for i, (_w, share) in votes.items() if share < WARD_PURITY_WARN)
+    for share, s in weak:
+        print(f"  WARNING: SMD {s} ward vote only {share:.0%} for Ward {ward_of[s]} "
+              f"(requests since {WARD_FIELD_FROM}) — check it against the ward map", file=sys.stderr)
+    shares = [share for _w, share in votes.values()]
+    print(f"  ward vote: min purity {min(shares):.1%} over {len(votes)} SMDs "
+          f"(requests since {WARD_FIELD_FROM})", file=sys.stderr)
     for s, d, w in odd:
         print(f"  note: SMD {s} is in Ward {w} (its ANC id starts with {d})",
               file=sys.stderr)
@@ -308,7 +351,8 @@ def main():
               file=sys.stderr)
     areas, wards, ancs, smd_anc, smd_ward = area_tree(smd_ids, anc_of, ward_of)
 
-    # Month axis ends at data_through's month (drops a stray future-dated row).
+    # Month axis ends at data_through's month (future-dated rows were skipped in
+    # read_rows, so this is today's month at the latest).
     n_mon = month_index(data_through, start) + 1
     in_range = mon < n_mon
     all_totals = np.bincount(code[in_range], minlength=len(codes))
@@ -357,7 +401,6 @@ def main():
             total_bytes += sz
             biggest = max(biggest, (sz, aid))
 
-    last = date.fromisoformat(data_through)
     categories = []
     for k, ck in enumerate(cat_keys):
         if ck == OTHER:
@@ -375,8 +418,11 @@ def main():
         "data_through": data_through,
         "months": month_labels(start, n_mon),
         # the newest month is incomplete unless the data runs to its last day
-        "partial_last": (last + timedelta(days=1)).month == last.month,
+        "partial_last": is_partial_month(data_through),
         "min_close_n": C.AREA_TRENDS_MIN_CLOSE_N,
+        # SMDs whose ward vote was weak (guardrail warns; see WARD_FIELD_FROM)
+        "ward_vote": {"since": WARD_FIELD_FROM, "min_share": round(min(shares), 3),
+                      "weak": [[s, round(share, 3)] for share, s in weak]},
         "close_levels": list(CLOSE_LEVELS),
         "residents_per_smd": 2000,
         "categories": categories,
@@ -384,8 +430,9 @@ def main():
         "areas": areas,
         "method": ("Requests placed in a 2023 SMD by point-in-polygon of their LAT/LON "
                    "(as smd.py; placeholder pins excluded). ANC and ward come from the SMD; "
-                   "citywide = all SMDs. Time to close = resolved minus opened date, by month "
-                   "opened; still-open requests count as slowest."),
+                   "citywide = all SMDs. Months are by the request's opened date in UTC. "
+                   "Time to close = resolved minus opened date, by month opened; still-open "
+                   "requests count as slowest."),
     }
     ip = OUT / "index.json"
     ip.write_text(json.dumps(index, separators=(",", ":")))

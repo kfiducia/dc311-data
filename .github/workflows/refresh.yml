@@ -79,9 +79,13 @@ jobs:
         if: ${{ !inputs.skip_build }}
         run: pip install -r pipeline/requirements.txt
 
-      # Pipeline unit tests (stdlib unittest; no data or network needed).
+      # Pipeline unit tests (stdlib unittest; no data or network needed). They
+      # cover area_trends.py only, so a failure skips the area-trends build (see
+      # below) instead of stopping the rest of the run.
       - name: Pipeline unit tests
+        id: unittests
         if: ${{ !inputs.skip_build }}
+        continue-on-error: true
         run: python -m unittest discover -s pipeline -p 'test_*.py'
 
       # Force the current, still-growing year to be re-pulled (fetch.py + smd.py
@@ -127,17 +131,28 @@ jobs:
         if: ${{ !inputs.skip_build }}
         run: python pipeline/smd.py
 
-      # Area-trends page: monthly Ward/ANC/SMD x category cubes, one file per area
-      # (reads the _all_ checkpoints + cached SMD boundaries; no network).
-      - name: Build area trends
-        if: ${{ !inputs.skip_build }}
-        run: python pipeline/area_trends.py
-
       # Rat-report export for the abatement coordinator (reads the _all_ checkpoints;
       # fetches DC's city-block "Squares" layer itself).
       - name: Build rat-report export
         if: ${{ !inputs.skip_build }}
         run: python pipeline/rats.py
+
+      # Area-trends page: monthly Ward/ANC/SMD x category cubes, one file per area
+      # (reads the _all_ checkpoints + cached SMD boundaries; no network). Runs
+      # AFTER the rat export and never blocks the deploy: if the build or its own
+      # guardrail fails, agg/area_trends/ is dropped from this deploy (the page
+      # then says it couldn't load) and everything else, rat feed included, ships.
+      - name: Build area trends
+        if: ${{ !inputs.skip_build && steps.unittests.outcome == 'success' }}
+        continue-on-error: true
+        run: python pipeline/area_trends.py
+      - name: Guardrail (area trends; drops it from the deploy on failure)
+        if: ${{ !inputs.skip_build }}
+        run: |
+          if ! python pipeline/guardrail.py --only area-trends; then
+            echo "::warning::area trends failed its sanity check — not publishing agg/area_trends/ this run"
+            rm -rf agg/area_trends
+          fi
 
       # Sanity-gate the freshly built artifacts. On failure the job stops here, no
       # deploy runs, and the last good Pages deploy stays live.

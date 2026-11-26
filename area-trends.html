@@ -239,31 +239,47 @@ const monLabel = ym => MON[+ym.slice(5, 7) - 1] + ' ' + ym.slice(0, 4);
 const XTICKS = () => ({ maxTicksLimit: innerWidth < 640 ? 5 : 12, maxRotation: 0, autoSkip: true });
 const MAX_CLOSE_CATS = 4;   // lines on the time-to-close chart before it gets unreadable
 
-let IDX, AREA = {}, CAT = {}, volChart = null, closeChart = null;
+// Lookups keyed by URL-supplied strings: no prototype, so ?area=constructor /
+// __proto__ or cats=toString can't match an inherited property.
+let IDX, volChart = null, closeChart = null, renderSeq = 0;
+const AREA = Object.create(null), CAT = Object.create(null);
+const own = (o, k) => o != null && Object.hasOwn(o, k);
 const cache = new Map();
 const loadArea = id => {
   if (!cache.has(id)) cache.set(id, fetch(`agg/area_trends/${encodeURIComponent(id)}.json`)
-    .then(r => r.ok ? r.json() : Promise.reject(new Error(id + ' ' + r.status))));
+    .then(r => r.ok ? r.json() : Promise.reject(new Error(id + ' ' + r.status)))
+    .catch(e => { cache.delete(id); throw e; }));   // don't cache a failure forever
   return cache.get(id);
 };
+// last month with complete data, and the start years worth offering (a year whose
+// only month is the dropped partial one isn't one)
+const lastComplete = () => IDX.partial_last ? IDX.months.length - 2 : IDX.months.length - 1;
+const fromYears = () => [...new Set(IDX.months.slice(0, lastComplete() + 1).map(m => +m.slice(0, 4)))];
 
 // ---- state <-> URL ------------------------------------------------------
-const S = { area: 'city', cats: [], measure: 'rate', smooth: false, from: null };
+// _ward: which ward's picker an ANC spanning two wards (3/4G, 8F) was chosen under
+const S = { area: 'city', cats: [], measure: 'rate', smooth: false, from: null, _ward: '' };
+const spansWards = a => a.level === 'anc' && a.wards.length > 1;
 function readUrl() {
   const q = new URLSearchParams(location.search);
-  if (q.get('area') && AREA[q.get('area')]) S.area = q.get('area');
+  const area = q.get('area');
+  if (area && own(AREA, area)) S.area = area;
+  const w = q.get('ward');
+  S._ward = w && spansWards(AREA[S.area]) && AREA[S.area].wards.includes(w) ? w : '';
   const preset = IDX.presets.find(p => p.key === q.get('preset'));
-  const cats = (q.get('cats') || '').split(',').filter(c => CAT[c]);
-  S.cats = cats.length ? cats : (preset || IDX.presets[0]).codes.filter(c => CAT[c]);
+  const cats = [...new Set((q.get('cats') || '').split(',').filter(c => own(CAT, c)))];
+  S.cats = cats.length ? cats : (preset || IDX.presets[0]).codes.filter(c => own(CAT, c));
   if (['rate', 'count', 'index'].includes(q.get('measure'))) S.measure = q.get('measure');
   S.smooth = q.get('smooth') === '1';
-  const years = IDX.months.map(m => +m.slice(0, 4));
+  const years = fromYears();
   const f = +q.get('from');
-  S.from = f >= years[0] && f <= years[years.length - 1] ? f : Math.max(years[0], years[years.length - 1] - 5);
+  S.from = years.includes(f) ? f : Math.max(years[0], years[years.length - 1] - 5);
 }
 function writeUrl() {
   const q = new URLSearchParams();
   q.set('area', S.area);
+  const a = AREA[S.area];
+  if (spansWards(a) && S._ward && S._ward !== a.ward) q.set('ward', S._ward);
   const p = IDX.presets.find(p => sameSet(p.codes.filter(c => CAT[c]), S.cats));
   if (p) q.set('preset', p.key); else q.set('cats', S.cats.join(','));
   q.set('measure', S.measure);
@@ -282,29 +298,37 @@ function chain(id) {        // the area, then each larger area it's compared wit
   if (a.level !== 'city') out.push(AREA.city);
   return out;
 }
+// Replace a select's options only when the list actually changed, so arrowing
+// through a focused select (each step fires `change` -> update()) never rebuilds
+// the list under the cursor.
+function setOptions(el, html, value, disabled) {
+  if (el.dataset.opts !== html) { el.innerHTML = html; el.dataset.opts = html; }
+  el.disabled = !!disabled;
+  if (el.value !== value) el.value = value;
+}
 function fillPickers() {
   const a = AREA[S.area];
-  const w = a.level === 'city' ? '' : a.level === 'ward' ? a.id : (a.level === 'anc' ? (S._ward && a.wards.includes(S._ward) ? S._ward : a.ward) : a.ward);
+  const w = a.level === 'city' ? '' : a.level === 'ward' ? a.id
+          : a.level === 'anc' ? (S._ward && a.wards.includes(S._ward) ? S._ward : a.ward) : a.ward;
   const anc = a.level === 'anc' ? a.id : a.level === 'smd' ? a.anc : '';
   const areas = IDX.areas;
-  $('ward').innerHTML = '<option value="">All of DC</option>' +
-    areas.filter(x => x.level === 'ward').map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
-  $('ward').value = w;
+  setOptions($('ward'), '<option value="">All of DC</option>' +
+    areas.filter(x => x.level === 'ward').map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join(''), w);
   const ancs = w ? areas.filter(x => x.level === 'anc' && x.wards.includes(w)) : [];
-  $('anc').innerHTML = `<option value="">${w ? 'Whole ward' : '— pick a ward first —'}</option>` +
-    ancs.map(x => `<option value="${esc(x.id)}">${esc(x.name)}${x.wards.length > 1 ? ' (spans ' + x.wards.map(v => AREA[v].name).join(' & ') + ')' : ''}</option>`).join('');
-  $('anc').disabled = !w; $('anc').value = anc;
+  setOptions($('anc'), `<option value="">${w ? 'Whole ward' : '— pick a ward first —'}</option>` +
+    ancs.map(x => `<option value="${esc(x.id)}">${esc(x.name)}${x.wards.length > 1 ? ' (spans ' + x.wards.map(v => AREA[v].name).join(' & ') + ')' : ''}</option>`).join(''),
+    anc, !w);
   const smds = anc ? areas.filter(x => x.level === 'smd' && x.anc === anc) : [];
-  $('smd').innerHTML = `<option value="">${anc ? 'Whole ANC' : '— pick an ANC first —'}</option>` +
-    smds.map(x => `<option value="${esc(x.id)}">${esc(x.name)}${x.ward !== AREA[anc].ward ? ' (' + AREA[x.ward].name + ')' : ''}</option>`).join('');
-  $('smd').disabled = !anc; $('smd').value = a.level === 'smd' ? a.id : '';
+  setOptions($('smd'), `<option value="">${anc ? 'Whole ANC' : '— pick an ANC first —'}</option>` +
+    smds.map(x => `<option value="${esc(x.id)}">${esc(x.name)}${x.ward !== AREA[anc].ward ? ' (' + AREA[x.ward].name + ')' : ''}</option>`).join(''),
+    a.level === 'smd' ? a.id : '', !anc);
 }
 function fillCats() {
   $('presets').querySelectorAll('.chip').forEach(b => b.remove());
   IDX.presets.forEach(p => {
     const b = document.createElement('button');
     b.className = 'chip'; b.type = 'button'; b.textContent = p.label; b.dataset.key = p.key;
-    b.onclick = () => { S.cats = p.codes.filter(c => CAT[c]); update(); };
+    b.onclick = () => { S.cats = p.codes.filter(c => own(CAT, c)); update(); };
     $('presets').appendChild(b);
   });
   $('catgrid').innerHTML = IDX.categories.map(c =>
@@ -338,7 +362,7 @@ function catLabel() {
 // ---- series math ---------------------------------------------------------
 function sumCats(doc, cats) {
   const n = IDX.months.length, out = new Array(n).fill(0);
-  cats.forEach(c => { const a = doc.c[c]; if (a) for (let i = 0; i < n; i++) out[i] += a[i]; });
+  cats.forEach(c => { const a = own(doc.c, c) ? doc.c[c] : null; if (a) for (let i = 0; i < n; i++) out[i] += a[i]; });
   return out;
 }
 const smooth3 = a => a.map((v, i) => i < 2 ? null : (a[i] + a[i - 1] + a[i - 2]) / 3);
@@ -353,15 +377,29 @@ function transform(raw, area, base) {
 }
 
 // ---- render ---------------------------------------------------------------
+function clearCharts() {
+  if (volChart) { volChart.destroy(); volChart = null; }
+  if (closeChart) { closeChart.destroy(); closeChart = null; }
+  $('tiles').innerHTML = ''; $('subtitle').textContent = '';
+  $('volnote').textContent = ''; $('closenote').textContent = '';
+}
 async function update() {
   writeUrl(); syncControls();
+  const seq = ++renderSeq;   // a slower, older load must not paint over a newer selection
   const areas = chain(S.area), base = areas[0];
   let docs;
   try { docs = await Promise.all(areas.map(a => loadArea(a.id))); }
-  catch (e) { $('title').textContent = 'Couldn’t load data for this area — try reloading.'; return; }
+  catch (e) {
+    if (seq !== renderSeq) return;
+    clearCharts();
+    $('title').textContent = `Couldn’t load data for ${base.name} — try again in a moment.`;
+    console.warn('area_trends load failed:', e);
+    return;
+  }
+  if (seq !== renderSeq) return;
 
   const months = IDX.months;
-  const last = IDX.partial_last ? months.length - 2 : months.length - 1;   // last complete month
+  const last = lastComplete();
   const lo = Math.max(0, months.indexOf(`${S.from}-01`));
   const range = [lo, last];
   const labels = months.slice(lo, last + 1).map(monLabel);
@@ -419,6 +457,10 @@ async function update() {
   const notes = [];
   if (S.measure === 'rate') notes.push(`Per-resident rates assume about ${nf(IDX.residents_per_smd)} residents per SMD — DC draws every SMD to roughly that size — so ${base.name} counts as about ${nf(base.n_smd * IDX.residents_per_smd)} residents. Good for comparing areas; not an exact census figure.`);
   if (S.measure === 'count' && areas.length > 1) notes.push(`Comparison lines are scaled to ${base.name}’s size: what it would have filed at that area’s per-resident rate.`);
+  if (spansWards(base)) {
+    const n = IDX.areas.filter(x => x.level === 'smd' && x.anc === base.id && x.ward === base.ward).length;
+    notes.push(`${base.name} spans ${base.wards.map(w => AREA[w].name).join(' and ')}; it’s compared with ${AREA[base.ward].name}, which holds ${n} of its ${base.n_smd} SMDs. Pick one of its SMDs to compare with that SMD’s own ward.`);
+  }
   if (S.measure === 'index') notes.push('Each line is divided by its own average over the months shown, so the lines compare the shape of the trend, not the level.');
   if (IDX.partial_last) notes.push(`${monLabel(months[months.length - 1])} is left out: the data only runs through ${IDX.data_through}.`);
   if (base.level === 'smd' && l12[0] < 60) notes.push('Small numbers: a single SMD files few requests of one type, so month-to-month swings are mostly noise. The 3-month average helps.');
@@ -450,7 +492,7 @@ function renderClose(areas, docs, range, months) {
   const ds = [];
   showCats.forEach((c, k) => {
     const color = PAL[k % PAL.length];
-    const pick = (d) => ((d.m && d.m[c]) || []).slice(range[0], range[1] + 1);
+    const pick = (d) => ((d && own(d.m, c)) ? d.m[c] : []).slice(range[0], range[1] + 1);
     ds.push({ label: `${CAT[c].label} — ${base.name}`, data: pick(docs[0]), borderColor: color, backgroundColor: color,
               borderWidth: 2, pointRadius: 1.5, tension: .2, spanGaps: false });
     if (base.level !== 'city') ds.push({ label: `${CAT[c].label} — All of DC`, data: pick(docs[docs.length - 1]),
@@ -476,12 +518,11 @@ fetch('agg/area_trends/index.json').then(r => r.ok ? r.json() : Promise.reject(r
   IDX = idx;
   idx.areas.forEach(a => { AREA[a.id] = a; });
   idx.categories.forEach(c => { CAT[c.code] = c; });
-  const years = [...new Set(idx.months.map(m => +m.slice(0, 4)))];
-  $('from').innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
+  $('from').innerHTML = fromYears().map(y => `<option value="${y}">${y}</option>`).join('');
   fillCats();
   readUrl();
   $('ward').onchange = e => { S.area = e.target.value || 'city'; S._ward = e.target.value; update(); };
-  $('anc').onchange = e => { S.area = e.target.value || $('ward').value; update(); };
+  $('anc').onchange = e => { S._ward = $('ward').value; S.area = e.target.value || $('ward').value; update(); };
   $('smd').onchange = e => { S.area = e.target.value || $('anc').value; update(); };
   $('measure').onclick = e => { const v = e.target.dataset && e.target.dataset.v; if (v) { S.measure = v; update(); } };
   $('smooth').onchange = e => { S.smooth = e.target.checked; update(); };
