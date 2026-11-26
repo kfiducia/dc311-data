@@ -1,24 +1,25 @@
 source,count
-Agent,506910
-Web,197957
-Mobile,99968
-iOS,70006
+Agent,545025
+Web,221271
+Mobile,99971
+iOS,84860
 Portal,60408
+iOS Browser,53369
 API IVR,49211
-iOS Browser,31533
+Android,21780
+IVR,19963
 SeeClickFix,19916
-IVR,19865
-Android,18872
+Android Browser,10056
 OUC-Innovations,8070
-Android Browser,6060
+AWS Connect - Production,5534
 Text-To-311,3258
 EOM,2751
-AWS Connect - Production,2159
+snap311,2740
 DowntownBid,477
 API BID,246
-DPW-Trakster Key,27
+DPW-Trakster Key,40
+JPtest,3
 API,3
 Testing Class 2,2
 DC Council,1
 Dept App,1
-JPtest,1
