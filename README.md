@@ -27,6 +27,20 @@ web, desktop web, native app) and submission-volume trends.
 - `agg/anomalies.json` — per-ward month-over-baseline anomaly board
 - `smd.html` + `agg/smd.json` + `agg/smd_boundaries.min.geojson` — per-SMD (ANC
   Single Member District) ranked chart + choropleth map
+- `area-trends.html` + `agg/area_trends/` — **Area Trends**: pick a Ward → ANC →
+  SMD and one or more complaint types (presets: missed trash & recycling, bulk,
+  dumping, rats, parking, potholes, streetlights) for the monthly trend since 2016,
+  compared per resident with the area's ANC, ward and the city, plus median days to
+  close (ANC/ward/city only). State lives in the URL, so a view can be shared.
+  `pipeline/area_trends.py` writes one ~25 KB file per area (~400 files, ~4.4 MB,
+  built in CI and never committed); a page view loads 2–4 of them (~30 KB gzipped).
+  Areas use the 2023 SMD lines for every year; each SMD's ward is the majority
+  WARD field of its requests since 2025-03 (earlier rows still carry the pre-2022
+  ward lines). Two ANCs span two wards: 3/4G (Wards 3 and 4) and 8F (Wards 6 and 8;
+  8F04/8F05 are in Ward 6). Months are bucketed by UTC date. In CI the area-trends
+  build runs after the rat export and can't block the deploy: if it (or its unit
+  tests or `guardrail.py --only area-trends`) fails, `agg/area_trends/` is left out
+  of that deploy and the rest of the site ships
 - `agg/rats/` — rat-report export for the
   [abatement coordinator](https://abatement.home-rule.org) (`pipeline/rats.py`):
   per-year rat reports with their SMD, per-SMD rankings, and city blocks with
@@ -67,6 +81,7 @@ python pipeline/refresh_submission.py # submission volume -> agg.json + dashboar
 python pipeline/categories.py         # complaint-category cube -> agg/categories.json
 python pipeline/anomaly.py            # per-ward month-over-baseline board -> agg/anomalies.json
 python pipeline/smd.py                # per-SMD counts + simplified boundaries -> agg/smd*.json
+python pipeline/area_trends.py        # monthly Ward/ANC/SMD x category cubes -> agg/area_trends/
 python pipeline/rats.py               # rat-report export for the abatement coordinator -> agg/rats/
 python pipeline/guardrail.py          # fail (=> no deploy, last-good site stays live) if a build is empty/degenerate
 ```
@@ -98,7 +113,9 @@ pipeline first:
 
 ```
 cd pipeline && python fetch.py && python build.py && python refresh_submission.py \
-  && python categories.py && python anomaly.py && python smd.py && python rats.py
+  && python categories.py && python anomaly.py && python smd.py && python area_trends.py \
+  && python rats.py
+python -m unittest discover -s pipeline -p 'test_*.py'   # pipeline unit tests
 python pipeline/guardrail.py
 # then serve the repo root: python -m http.server 8000
 ```

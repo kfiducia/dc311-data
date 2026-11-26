@@ -226,6 +226,67 @@ def check_rats_export(require, warns):
         require(ok, f"rats export file {f.get('path')} missing or sha256 mismatch")
 
 
+def check_area_trends(require, warns):
+    """agg/area_trends/ (area_trends.py): the index must list every area, every
+    area file must exist and parse, the SMD, ANC and ward files must each add up
+    to the city total, every ward must hold an SMD, and the files must stay small
+    enough to load one area at a time. A weak SMD ward vote is a warning.
+
+    Run on its own (`--only area-trends`) by refresh.yml, NOT from main(): a broken
+    area-trends build drops agg/area_trends/ from that deploy instead of blocking
+    the rest of the site (and the rat feed)."""
+    base = ROOT / "agg" / "area_trends"
+    idx, _ = _load("agg/area_trends/index.json")
+    if not isinstance(idx, dict):
+        require(False, f"agg/area_trends/index.json missing or malformed ({idx})")
+        return
+    areas = idx.get("areas") or []
+    months = idx.get("months") or []
+    smds = [a for a in areas if a.get("level") == "smd"]
+    require(len(smds) >= 300, f"area_trends: too few SMDs ({len(smds)})")
+    require(sum(a.get("level") == "ward" for a in areas) == 8, "area_trends: expected 8 wards")
+    require(len(months) > 100, f"area_trends: too few months ({len(months)})")
+    require(len(idx.get("categories") or []) >= 10, "area_trends: too few categories")
+    require(bool(idx.get("presets")), "area_trends: no presets")
+    require(all("/" not in a["id"] for a in areas), "area_trends: an area id is not filename-safe")
+    city, _ = _load("agg/area_trends/city.json")
+    if not isinstance(city, dict):
+        require(False, "agg/area_trends/city.json missing or malformed")
+        return
+    tot = city.get("all") or []
+    require(len(tot) == len(months), "area_trends: city series length != months")
+    require(sum(tot) >= 3_000_000, f"area_trends: city total too low ({sum(tot):,})")
+    last_full = tot[-2] if idx.get("partial_last") and len(tot) > 1 else (tot[-1] if tot else 0)
+    require(last_full > 10_000, f"area_trends: latest complete month only {last_full:,} requests")
+    sums = {lvl: [0] * len(months) for lvl in ("ward", "anc", "smd")}
+    missing, bad, biggest = [], [], 0
+    for a in areas:
+        p = base / f"{a['id']}.json"
+        if not p.exists():
+            missing.append(a["id"])
+            continue
+        biggest = max(biggest, p.stat().st_size)
+        lvl = a.get("level")
+        if lvl in sums:
+            try:
+                series = json.loads(p.read_text()).get("all") or []
+            except json.JSONDecodeError:
+                bad.append(a["id"])
+                continue
+            for i, v in enumerate(series[:len(months)]):
+                sums[lvl][i] += v
+    require(not missing, f"area_trends: {len(missing)} area file(s) missing, e.g. {missing[:3]}")
+    require(not bad, f"area_trends: {len(bad)} malformed area file(s), e.g. {bad[:3]}")
+    for lvl, s in sums.items():
+        require(s == tot, f"area_trends: {lvl.upper()} files don't add up to the city total")
+    smd_wards = {a.get("ward") for a in smds}
+    empty = [a["id"] for a in areas if a.get("level") == "ward" and a["id"] not in smd_wards]
+    require(not empty, f"area_trends: ward(s) with no SMD: {empty}")
+    require(biggest < 200_000, f"area_trends: largest area file {biggest:,} B (should be ~30 KB)")
+    for s, share in (idx.get("ward_vote") or {}).get("weak") or []:
+        warns.append(f"area_trends: SMD {s} ward vote only {share:.0%} — check its ward")
+
+
 def main():
     errs = []
     warns = []
@@ -285,24 +346,43 @@ def main():
     require(isinstance(anom, dict) and "board" in anom,
             "agg/anomalies.json missing or empty")
 
+    # (area-trends is checked separately: `guardrail.py --only area-trends`)
+
     # --- rat export for the abatement coordinator (a published contract — see rats.py)
     check_rats_export(require, warns)
 
     # --- DCD13: dropout guardrails ---
     check_source_counts(errs, warns)
     check_signal_series(errs, warns)
+    report(errs, warns, "BUILD SANITY FAILED — refusing to deploy:",
+           "Guardrail passed — all built artifacts look sane.")
 
+
+def report(errs, warns, fail_title, ok_msg):
     if warns:
         print("Guardrail warnings (non-blocking):")
         for w in warns:
             print(f"  ⚠ {w}")
     if errs:
-        print("BUILD SANITY FAILED — refusing to deploy:")
+        print(fail_title)
         for e in errs:
             print(f"  ✗ {e}")
         sys.exit(1)
-    print("Guardrail passed — all built artifacts look sane.")
+    print(ok_msg)
+
+
+def main_area_trends():
+    """`--only area-trends`: exit 1 if agg/area_trends/ is broken. refresh.yml then
+    drops that directory from the deploy rather than failing the whole run."""
+    errs, warns = [], []
+    check_area_trends(lambda ok, msg: ok or errs.append(msg), warns)
+    report(errs, warns, "AREA TRENDS SANITY FAILED:", "Area-trends guardrail passed.")
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["--only", "area-trends"]:
+        main_area_trends()
+    elif sys.argv[1:]:
+        raise SystemExit("usage: guardrail.py [--only area-trends]")
+    else:
+        main()
