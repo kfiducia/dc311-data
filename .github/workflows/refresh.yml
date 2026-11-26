@@ -10,6 +10,7 @@ name: Refresh dashboard data
 #   * agg.json + dashboards                     — submission volume (refresh_submission)
 #   * agg/categories.json, agg/anomalies.json   — category + ward-anomaly boards
 #   * agg/smd.json, agg/smd_boundaries.min.geojson — SMD chart + choropleth (smd.py)
+#   * agg/area_trends/*  — area-trends.html monthly per-area cubes (area_trends.py)
 #   * agg/rats/*  — rat-report export consumed by abatement.home-rule.org (rats.py).
 #     A PUBLISHED CONTRACT: that site's cron polls agg/rats/meta.json and reloads
 #     when `generated` changes. A deploy-only run (skip_build) publishes WITHOUT
@@ -78,6 +79,11 @@ jobs:
         if: ${{ !inputs.skip_build }}
         run: pip install -r pipeline/requirements.txt
 
+      # Pipeline unit tests (stdlib unittest; no data or network needed).
+      - name: Pipeline unit tests
+        if: ${{ !inputs.skip_build }}
+        run: python -m unittest discover -s pipeline -p 'test_*.py'
+
       # Force the current, still-growing year to be re-pulled (fetch.py + smd.py
       # treat an existing per-year checkpoint as final; this matches "_<signal>_"
       # and "_smd_pts_" checkpoints alike).
@@ -120,6 +126,12 @@ jobs:
       - name: Build SMD aggregates
         if: ${{ !inputs.skip_build }}
         run: python pipeline/smd.py
+
+      # Area-trends page: monthly Ward/ANC/SMD x category cubes, one file per area
+      # (reads the _all_ checkpoints + cached SMD boundaries; no network).
+      - name: Build area trends
+        if: ${{ !inputs.skip_build }}
+        run: python pipeline/area_trends.py
 
       # Rat-report export for the abatement coordinator (reads the _all_ checkpoints;
       # fetches DC's city-block "Squares" layer itself).

@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DC 311 — Area Trends</title>
+<meta name="description" content="Monthly DC 311 complaint trends for any Ward, ANC or Single Member District, compared with its ward and the city, with time to close. Shareable links.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://kfiducia.github.io/dc311-data/area-trends.html">
+<meta property="og:title" content="DC 311 — Area Trends">
+<meta property="og:description" content="Monthly 311 complaint trends for any Ward, ANC or SMD, compared with the ward and the city.">
+<meta property="og:image" content="https://kfiducia.github.io/dc311-data/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="DC 311 — Area Trends">
+<meta name="twitter:description" content="Monthly 311 complaint trends for any Ward, ANC or SMD.">
+<meta name="twitter:image" content="https://kfiducia.github.io/dc311-data/og.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&family=VT323&display=swap" rel="stylesheet">
+<script src="chart.umd.min.js"></script>
+<style>
+  :root {
+    --cream: #f3efe2;
+    --cream-2: #ecead9;
+    --ink: #1c1f24;
+    --ink-2: #4a4d52;
+    --muted: #8a8a85;
+    --line: #d8d4c5;
+    --accent: #d97e3f;
+    --teal: #3d7d8c;
+    --green: #3f8f5b;
+    --crt: rgba(28, 31, 36, 0.04);
+    --nav-bg: rgba(244, 241, 232, 0.92);
+    --flag-bg: rgba(255, 255, 255, 0.4);
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --display: 'VT323', 'JetBrains Mono', monospace;
+    --ease: cubic-bezier(.2,.6,.2,1);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --cream: #15181d;
+      --cream-2: #1d2025;
+      --ink: #ece8d8;
+      --ink-2: #b5b1a4;
+      --muted: #6f6f68;
+      --line: #2c2f36;
+      --accent: #e88a48;
+      --teal: #5fa9ba;
+      --green: #63b37f;
+      --crt: rgba(255, 255, 255, 0.025);
+      --nav-bg: rgba(21, 24, 29, 0.92);
+      --flag-bg: rgba(255, 255, 255, 0.04);
+      color-scheme: dark;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--cream); color: var(--ink); font-family: var(--mono);
+    font-size: 14px; line-height: 1.55; -webkit-font-smoothing: antialiased;
+    background-image: repeating-linear-gradient(
+      to bottom, transparent 0, transparent 2px, var(--crt) 2px, var(--crt) 3px);
+  }
+  a { color: inherit; }
+  ::selection { background: var(--accent); color: var(--cream); }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 0 clamp(1rem, 3vw, 2.5rem); }
+
+  /* ─── Nav ─── */
+  .nav { position: sticky; top: 0; z-index: 50; background: var(--nav-bg);
+    backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  .nav-inner { max-width: 1280px; margin: 0 auto; padding: 0.9rem clamp(1rem, 3vw, 2.5rem);
+    display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  .nav a { text-decoration: none; }
+  .nav-back { font-weight: 700; font-size: .72rem; letter-spacing: .1em; text-transform: lowercase;
+    color: var(--ink-2); }
+  .nav-back::before { content: "← "; color: var(--accent); }
+  .nav-back:hover, .nav-tag:hover { color: var(--accent); }
+  .nav-links { display: flex; gap: 1.1rem; flex-wrap: wrap; }
+  .nav-tag { font-size: .68rem; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .nav-tag::before { content: "// "; color: var(--accent); opacity: .8; }
+
+  /* ─── Header ─── */
+  header.page { padding: clamp(2rem, 5vw, 3.5rem) 0 1rem; }
+  .label-stack { font-family: var(--display); font-weight: 400; line-height: .9; margin: 0; }
+  .label-stack::before { content: ">_"; display: block; font-family: var(--mono); font-size: .72rem;
+    letter-spacing: .12em; color: var(--accent); font-weight: 600; margin-bottom: .65rem; }
+  .label-stack .top { display: block; opacity: .55; font-size: clamp(2rem, 4vw, 3rem); }
+  .label-stack .bot { display: block; font-size: clamp(2.4rem, 5vw, 3.8rem); }
+  .sub { margin-top: 1.1rem; font-size: .8rem; color: var(--ink-2); max-width: 82ch; line-height: 1.65; }
+  .sub::before { content: "// "; color: var(--accent); opacity: .8; }
+
+  /* ─── Controls ─── */
+  .controls { margin-top: 1.25rem; padding: .85rem 1.1rem; border: 1px solid var(--line);
+    border-left: 3px solid var(--accent); background: var(--flag-bg);
+    display: grid; gap: .8rem; }
+  .row { display: flex; align-items: center; gap: .6rem 1rem; flex-wrap: wrap; }
+  .l { font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2);
+    font-size: .68rem; }
+  .l::before { content: ">"; color: var(--accent); margin-right: .4rem; }
+  select, button.btn { background: var(--cream-2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 0; padding: .35rem .6rem; font-family: var(--mono); font-size: .72rem;
+    font-weight: 600; letter-spacing: .04em; cursor: pointer; max-width: 100%; }
+  select:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visible {
+    outline: 1.5px solid var(--accent); outline-offset: 1px; }
+  button.btn:hover { border-color: var(--accent); color: var(--accent); }
+  .chip { background: transparent; color: var(--ink-2); border: 1px solid var(--line); border-radius: 0;
+    padding: .3rem .6rem; font-family: var(--mono); font-size: .7rem; cursor: pointer; }
+  .chip:hover { border-color: var(--accent); }
+  .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--cream); }
+  label.chk { display: inline-flex; align-items: center; gap: .35rem; font-size: .72rem;
+    color: var(--ink-2); cursor: pointer; }
+  details.cats summary { cursor: pointer; font-size: .72rem; color: var(--ink-2); }
+  details.cats summary b { color: var(--ink); }
+  .catgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: .25rem 1rem; margin-top: .6rem; max-height: 320px; overflow-y: auto; padding: .3rem; }
+  .catgrid label { font-size: .7rem; color: var(--ink-2); display: flex; gap: .4rem; align-items: baseline; cursor: pointer; }
+  .catgrid .n { color: var(--muted); }
+  .seg { display: inline-flex; border: 1px solid var(--line); }
+  .seg button { background: transparent; border: 0; border-right: 1px solid var(--line); color: var(--ink-2);
+    font-family: var(--mono); font-size: .7rem; padding: .3rem .6rem; cursor: pointer; }
+  .seg button:last-child { border-right: 0; }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--cream); }
+  #copied { font-size: .7rem; color: var(--green); }
+
+  /* ─── Cards ─── */
+  .card { margin: 1.25rem 0 1rem; border: 1px solid var(--line); padding: 1.1rem 1.25rem 1.3rem; }
+  .card h2 { margin: 0 0 .3rem; font-family: var(--display); font-weight: 400; font-size: 1.6rem; line-height: 1.05; }
+  .card p { margin: 0 0 .8rem; font-size: .72rem; color: var(--ink-2); line-height: 1.5; }
+  .canvas-wrap { position: relative; height: 360px; }
+  @media (max-width: 640px) { .canvas-wrap { height: 280px; } }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1px;
+    background: var(--line); border: 1px solid var(--line); margin: .3rem 0 1rem; }
+  .tile { background: var(--cream); padding: .7rem .85rem; }
+  .tile .n { font-family: var(--display); font-size: 2rem; line-height: 1; }
+  .tile .k { font-size: .66rem; color: var(--ink-2); margin-top: .35rem; line-height: 1.35; }
+  .up { color: #c0392b; } .down { color: var(--green); }
+  .note { font-size: .7rem; color: var(--muted); line-height: 1.55; margin-top: .6rem; }
+  .empty { font-size: .75rem; color: var(--muted); padding: 1.2rem 0; }
+  .prov { font-size: .66rem; color: var(--muted); line-height: 1.6; max-width: 100ch; }
+
+  footer { border-top: 1px solid var(--line); padding: 1.6rem 0 2.2rem; margin-top: 1.5rem; }
+  .foot-inner { display: flex; justify-content: space-between; gap: .8rem; flex-wrap: wrap;
+    font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .foot-inner a { text-decoration: none; } .foot-inner a:hover { color: var(--accent); }
+  .ast { color: var(--accent); }
+  @media print { .nav, .controls, footer { display: none; } }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-back">all dashboards</a>
+    <div class="nav-links">
+      <a href="smd.html" class="nav-tag">By SMD</a>
+      <a href="early-warning.html" class="nav-tag">▚ Complaint Radar</a>
+      <a href="dashboard.html" class="nav-tag">Submission methods</a>
+    </div>
+  </div>
+</nav>
+
+<main class="wrap">
+  <header class="page">
+    <h1 class="label-stack"><span class="top">DC 311</span><span class="bot">Area trends.</span></h1>
+    <div class="sub">Pick a Ward, ANC or Single Member District and one or more complaint types to
+      see how many requests residents filed each month, compared with the ward and the whole
+      city at the same size, and how long DC took to close them. The link updates as you go,
+      so you can share exactly this view.</div>
+
+    <div class="controls" id="controls">
+      <div class="row">
+        <span class="l">Area</span>
+        <select id="ward" aria-label="Ward"></select>
+        <select id="anc" aria-label="ANC"></select>
+        <select id="smd" aria-label="Single Member District"></select>
+      </div>
+      <div class="row" id="presets"><span class="l">Quick picks</span></div>
+      <details class="cats" id="catbox">
+        <summary>Complaint types: <b id="catsum">—</b> (click to choose)</summary>
+        <div class="catgrid" id="catgrid"></div>
+      </details>
+      <div class="row">
+        <span class="l">Show</span>
+        <span class="seg" id="measure" role="group" aria-label="Measure">
+          <button data-v="rate">per 1,000 residents</button><button data-v="count">counts</button><button data-v="index">vs own average</button>
+        </span>
+        <label class="chk"><input type="checkbox" id="smooth"> 3-month average</label>
+        <span class="l">From</span><select id="from" aria-label="Start year"></select>
+        <button class="btn" id="copy" type="button">Copy link</button><span id="copied" aria-live="polite"></span>
+      </div>
+    </div>
+  </header>
+
+  <div class="card">
+    <h2 id="title">Loading…</h2>
+    <p id="subtitle"></p>
+    <div class="tiles" id="tiles"></div>
+    <div class="canvas-wrap"><canvas id="vol" role="img" aria-label="Monthly requests chart"></canvas></div>
+    <p class="note" id="volnote"></p>
+  </div>
+
+  <div class="card">
+    <h2 id="ctitle">Median days to close</h2>
+    <p id="csub">For requests opened each month: the typical (median) number of days until DC
+      marked them closed. Solid = this area, dashed = all of DC.</p>
+    <div class="canvas-wrap" id="closewrap"><canvas id="close" role="img" aria-label="Median days to close chart"></canvas></div>
+    <p class="empty" id="closeempty" hidden></p>
+    <p class="note" id="closenote"></p>
+  </div>
+
+  <p class="prov" id="prov"></p>
+</main>
+
+<footer>
+  <div class="wrap foot-inner">
+    <span><span class="ast">✱</span> Kyle Fiducia · DC 311 Data · 2026</span>
+    <a href="https://github.com/kfiducia/dc311-data">github.com/kfiducia/dc311-data →</a>
+  </div>
+</footer>
+
+<script>
+const cssv = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const C = { area: cssv('--accent'), anc: cssv('--teal'), ward: cssv('--green'), city: cssv('--ink-2'),
+            line: cssv('--line'), ink2: cssv('--ink-2'), muted: cssv('--muted') };
+const PAL = [C.area, C.anc, C.ward, '#7b5ea7', '#c8a24a', '#c0392b'];
+Chart.defaults.color = C.ink2;
+Chart.defaults.borderColor = C.line;
+Chart.defaults.font.family = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
+Chart.defaults.font.size = 11;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const nf = (v, d = 0) => v == null || !isFinite(v) ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const monLabel = ym => MON[+ym.slice(5, 7) - 1] + ' ' + ym.slice(0, 4);
+const XTICKS = () => ({ maxTicksLimit: innerWidth < 640 ? 5 : 12, maxRotation: 0, autoSkip: true });
+const MAX_CLOSE_CATS = 4;   // lines on the time-to-close chart before it gets unreadable
+
+let IDX, AREA = {}, CAT = {}, volChart = null, closeChart = null;
+const cache = new Map();
+const loadArea = id => {
+  if (!cache.has(id)) cache.set(id, fetch(`agg/area_trends/${encodeURIComponent(id)}.json`)
+    .then(r => r.ok ? r.json() : Promise.reject(new Error(id + ' ' + r.status))));
+  return cache.get(id);
+};
+
+// ---- state <-> URL ------------------------------------------------------
+const S = { area: 'city', cats: [], measure: 'rate', smooth: false, from: null };
+function readUrl() {
+  const q = new URLSearchParams(location.search);
+  if (q.get('area') && AREA[q.get('area')]) S.area = q.get('area');
+  const preset = IDX.presets.find(p => p.key === q.get('preset'));
+  const cats = (q.get('cats') || '').split(',').filter(c => CAT[c]);
+  S.cats = cats.length ? cats : (preset || IDX.presets[0]).codes.filter(c => CAT[c]);
+  if (['rate', 'count', 'index'].includes(q.get('measure'))) S.measure = q.get('measure');
+  S.smooth = q.get('smooth') === '1';
+  const years = IDX.months.map(m => +m.slice(0, 4));
+  const f = +q.get('from');
+  S.from = f >= years[0] && f <= years[years.length - 1] ? f : Math.max(years[0], years[years.length - 1] - 5);
+}
+function writeUrl() {
+  const q = new URLSearchParams();
+  q.set('area', S.area);
+  const p = IDX.presets.find(p => sameSet(p.codes.filter(c => CAT[c]), S.cats));
+  if (p) q.set('preset', p.key); else q.set('cats', S.cats.join(','));
+  q.set('measure', S.measure);
+  if (S.smooth) q.set('smooth', '1');
+  q.set('from', S.from);
+  history.replaceState(null, '', '?' + q.toString());
+}
+const sameSet = (a, b) => a.length === b.length && a.every(x => b.includes(x));
+
+// ---- area tree / pickers ---------------------------------------------------
+const wardOf = a => a.level === 'city' ? null : a.level === 'ward' ? a.id : a.ward;
+function chain(id) {        // the area, then each larger area it's compared with
+  const a = AREA[id], out = [a];
+  if (a.level === 'smd') out.push(AREA[a.anc], AREA[a.ward]);
+  if (a.level === 'anc') out.push(AREA[a.ward]);
+  if (a.level !== 'city') out.push(AREA.city);
+  return out;
+}
+function fillPickers() {
+  const a = AREA[S.area];
+  const w = a.level === 'city' ? '' : a.level === 'ward' ? a.id : (a.level === 'anc' ? (S._ward && a.wards.includes(S._ward) ? S._ward : a.ward) : a.ward);
+  const anc = a.level === 'anc' ? a.id : a.level === 'smd' ? a.anc : '';
+  const areas = IDX.areas;
+  $('ward').innerHTML = '<option value="">All of DC</option>' +
+    areas.filter(x => x.level === 'ward').map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
+  $('ward').value = w;
+  const ancs = w ? areas.filter(x => x.level === 'anc' && x.wards.includes(w)) : [];
+  $('anc').innerHTML = `<option value="">${w ? 'Whole ward' : '— pick a ward first —'}</option>` +
+    ancs.map(x => `<option value="${esc(x.id)}">${esc(x.name)}${x.wards.length > 1 ? ' (spans ' + x.wards.map(v => AREA[v].name).join(' & ') + ')' : ''}</option>`).join('');
+  $('anc').disabled = !w; $('anc').value = anc;
+  const smds = anc ? areas.filter(x => x.level === 'smd' && x.anc === anc) : [];
+  $('smd').innerHTML = `<option value="">${anc ? 'Whole ANC' : '— pick an ANC first —'}</option>` +
+    smds.map(x => `<option value="${esc(x.id)}">${esc(x.name)}${x.ward !== AREA[anc].ward ? ' (' + AREA[x.ward].name + ')' : ''}</option>`).join('');
+  $('smd').disabled = !anc; $('smd').value = a.level === 'smd' ? a.id : '';
+}
+function fillCats() {
+  $('presets').querySelectorAll('.chip').forEach(b => b.remove());
+  IDX.presets.forEach(p => {
+    const b = document.createElement('button');
+    b.className = 'chip'; b.type = 'button'; b.textContent = p.label; b.dataset.key = p.key;
+    b.onclick = () => { S.cats = p.codes.filter(c => CAT[c]); update(); };
+    $('presets').appendChild(b);
+  });
+  $('catgrid').innerHTML = IDX.categories.map(c =>
+    `<label><input type="checkbox" value="${esc(c.code)}"> <span>${esc(c.label)} <span class="n">${nf(c.total)}</span></span></label>`).join('');
+  $('catgrid').addEventListener('change', e => {
+    const box = e.target; if (!box.value) return;
+    S.cats = box.checked ? [...new Set([...S.cats, box.value])] : S.cats.filter(c => c !== box.value);
+    if (!S.cats.length) { S.cats = [box.value]; box.checked = true; }   // never empty
+    update();
+  });
+}
+function syncControls() {
+  fillPickers();
+  $('presets').querySelectorAll('.chip').forEach(b => {
+    const p = IDX.presets.find(p => p.key === b.dataset.key);
+    b.setAttribute('aria-pressed', String(sameSet(p.codes.filter(c => CAT[c]), S.cats)));
+  });
+  $('catgrid').querySelectorAll('input').forEach(i => { i.checked = S.cats.includes(i.value); });
+  $('catsum').textContent = catLabel();
+  $('measure').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === S.measure)));
+  $('smooth').checked = S.smooth;
+  $('from').value = String(S.from);
+}
+function catLabel() {
+  const p = IDX.presets.find(p => sameSet(p.codes.filter(c => CAT[c]), S.cats));
+  if (p) return p.label;
+  const names = S.cats.map(c => CAT[c].label);
+  return names.length <= 3 ? names.join(' + ') : `${names.slice(0, 2).join(' + ')} + ${names.length - 2} more`;
+}
+
+// ---- series math ---------------------------------------------------------
+function sumCats(doc, cats) {
+  const n = IDX.months.length, out = new Array(n).fill(0);
+  cats.forEach(c => { const a = doc.c[c]; if (a) for (let i = 0; i < n; i++) out[i] += a[i]; });
+  return out;
+}
+const smooth3 = a => a.map((v, i) => i < 2 ? null : (a[i] + a[i - 1] + a[i - 2]) / 3);
+function transform(raw, area, base) {
+  // raw counts -> what the chart shows. `base` is the selected area (count mode
+  // scales larger areas down to its size so the lines are comparable).
+  let s = raw.slice();
+  if (S.measure === 'rate') s = s.map(v => v / (area.n_smd * IDX.residents_per_smd / 1000));
+  if (S.measure === 'count' && area !== base) s = s.map(v => v * base.n_smd / area.n_smd);
+  if (S.smooth) s = smooth3(s);
+  return s;
+}
+
+// ---- render ---------------------------------------------------------------
+async function update() {
+  writeUrl(); syncControls();
+  const areas = chain(S.area), base = areas[0];
+  let docs;
+  try { docs = await Promise.all(areas.map(a => loadArea(a.id))); }
+  catch (e) { $('title').textContent = 'Couldn’t load data for this area — try reloading.'; return; }
+
+  const months = IDX.months;
+  const last = IDX.partial_last ? months.length - 2 : months.length - 1;   // last complete month
+  const lo = Math.max(0, months.indexOf(`${S.from}-01`));
+  const range = [lo, last];
+  const labels = months.slice(lo, last + 1).map(monLabel);
+
+  $('title').textContent = `${catLabel()} — ${base.name}`;
+  const unit = { rate: 'requests per 1,000 residents per month',
+                 count: 'requests per month',
+                 index: 'monthly requests as % of each area’s own average (100 = average)' }[S.measure];
+  $('subtitle').textContent = `${monLabel(months[lo])} – ${monLabel(months[last])} · ${unit}` +
+    (S.smooth ? ' · 3-month rolling average' : '');
+
+  // headline tiles: last 12 complete months, raw counts
+  const raws = docs.map(d => sumCats(d, S.cats));
+  const win = (a, from, to) => a.slice(from, to + 1).reduce((s, v) => s + v, 0);
+  const l12 = raws.map(r => win(r, last - 11, last)), p12 = raws.map(r => win(r, last - 23, last - 12));
+  const rate = i => l12[i] / areas[i].n_smd;
+  const chg = p12[0] ? (l12[0] / p12[0] - 1) * 100 : null;
+  const tiles = [[nf(l12[0]), `requests in ${base.name}, last 12 months (${monLabel(months[last - 11])} – ${monLabel(months[last])})`],
+                 [chg == null ? '—' : `<span class="${chg > 0 ? 'up' : 'down'}">${chg > 0 ? '+' : ''}${nf(chg)}%</span>`,
+                  `vs the 12 months before (${nf(p12[0])})`]];
+  areas.slice(1).forEach((a, k) => {
+    const r = rate(k + 1) ? rate(0) / rate(k + 1) : null;
+    tiles.push([r == null ? '—' : nf(r, r < 10 ? 1 : 0) + '×', `the rate in ${a.name} (per resident, last 12 months)`]);
+  });
+  // n = numbers formatted here (may carry an up/down span); k = text, escaped
+  $('tiles').innerHTML = tiles.map(([n, k]) => `<div class="tile"><div class="n">${n}</div><div class="k">${esc(k)}</div></div>`).join('');
+
+  // main chart
+  const role = a => a.level === 'city' ? 'city' : a === base ? 'area' : a.level;
+  const sets = areas.map((a, i) => {
+    let s = transform(raws[i], a, base);
+    if (S.measure === 'index') {
+      const vis = raws[i].slice(range[0], range[1] + 1), mean = vis.reduce((x, y) => x + y, 0) / vis.length;
+      s = (S.smooth ? smooth3(raws[i]) : raws[i]).map(v => v == null || !mean ? null : 100 * v / mean);
+    }
+    const r = role(a);
+    let label = a.name;
+    if (a !== base && S.measure === 'count') label += ` (at ${base.name}’s size)`;
+    return { label, data: s.slice(range[0], range[1] + 1),
+             borderColor: C[r === 'area' ? 'area' : r], backgroundColor: C[r === 'area' ? 'area' : r],
+             borderWidth: a === base ? 2.6 : 1.5, borderDash: r === 'city' ? [5, 4] : [],
+             pointRadius: 0, pointHitRadius: 6, tension: .2, spanGaps: true, order: a === base ? 0 : 1 };
+  });
+  const dec = S.measure === 'rate' ? 2 : S.measure === 'index' ? 0 : (S.smooth || base.level === 'smd' ? 1 : 0);
+  if (volChart) volChart.destroy();
+  volChart = new Chart($('vol'), {
+    type: 'line', data: { labels, datasets: sets },
+    options: { maintainAspectRatio: false, responsive: true, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { labels: { boxWidth: 14, font: { size: 10 } } },
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, dec)}` } } },
+      scales: { x: { grid: { display: false }, ticks: XTICKS() },
+                y: { beginAtZero: true, grid: { color: C.line }, ticks: { callback: v => nf(v, S.measure === 'rate' ? 1 : 0) } } } }
+  });
+  const notes = [];
+  if (S.measure === 'rate') notes.push(`Per-resident rates assume about ${nf(IDX.residents_per_smd)} residents per SMD — DC draws every SMD to roughly that size — so ${base.name} counts as about ${nf(base.n_smd * IDX.residents_per_smd)} residents. Good for comparing areas; not an exact census figure.`);
+  if (S.measure === 'count' && areas.length > 1) notes.push(`Comparison lines are scaled to ${base.name}’s size: what it would have filed at that area’s per-resident rate.`);
+  if (S.measure === 'index') notes.push('Each line is divided by its own average over the months shown, so the lines compare the shape of the trend, not the level.');
+  if (IDX.partial_last) notes.push(`${monLabel(months[months.length - 1])} is left out: the data only runs through ${IDX.data_through}.`);
+  if (base.level === 'smd' && l12[0] < 60) notes.push('Small numbers: a single SMD files few requests of one type, so month-to-month swings are mostly noise. The 3-month average helps.');
+  const lowMap = S.cats.map(c => CAT[c]).filter(c => c.mapped_pct != null && c.mapped_pct < 95);
+  if (lowMap.length) notes.push('Only requests with a usable location are counted: ' + lowMap.map(c => `${c.label} ${nf(c.mapped_pct)}%`).join(', ') + ' of all.');
+  notes.push('A request is one report to 311, not one problem — several neighbours can report the same thing, and one report can cover a whole block.');
+  $('volnote').textContent = notes.join(' ');
+
+  renderClose(areas, docs, range, months);
+}
+
+function renderClose(areas, docs, range, months) {
+  const base = areas[0];
+  // single SMDs: counts only (too few requests per month for a meaningful median)
+  const showCats = S.cats.slice(0, MAX_CLOSE_CATS);
+  if (closeChart) { closeChart.destroy(); closeChart = null; }
+  const empty = $('closeempty');
+  if (base.level === 'smd') {
+    $('ctitle').textContent = 'Median days to close';
+    $('closewrap').hidden = true; empty.hidden = false;
+    empty.innerHTML = `Not shown for a single SMD: most months have too few requests of one type for a typical close time to mean anything. ` +
+      `<a href="#" id="toanc">See ${esc(areas[1].name)}</a> instead.`;
+    $('toanc').onclick = e => { e.preventDefault(); S.area = areas[1].id; update(); };
+    $('closenote').textContent = '';
+    return;
+  }
+  $('closewrap').hidden = false; empty.hidden = true;
+  $('ctitle').textContent = `Median days to close — ${base.name}`;
+  const ds = [];
+  showCats.forEach((c, k) => {
+    const color = PAL[k % PAL.length];
+    const pick = (d) => ((d.m && d.m[c]) || []).slice(range[0], range[1] + 1);
+    ds.push({ label: `${CAT[c].label} — ${base.name}`, data: pick(docs[0]), borderColor: color, backgroundColor: color,
+              borderWidth: 2, pointRadius: 1.5, tension: .2, spanGaps: false });
+    if (base.level !== 'city') ds.push({ label: `${CAT[c].label} — All of DC`, data: pick(docs[docs.length - 1]),
+              borderColor: color, backgroundColor: color, borderWidth: 1.2, borderDash: [5, 4], pointRadius: 0, tension: .2 });
+  });
+  closeChart = new Chart($('close'), {
+    type: 'line', data: { labels: months.slice(range[0], range[1] + 1).map(monLabel), datasets: ds },
+    options: { maintainAspectRatio: false, responsive: true, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { labels: { boxWidth: 14, font: { size: 10 } } },
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y == null ? 'n/a' : nf(c.parsed.y, 1) + ' days'}` } } },
+      scales: { x: { grid: { display: false }, ticks: XTICKS() },
+                y: { beginAtZero: true, grid: { color: C.line }, title: { display: true, text: 'days' } } } }
+  });
+  const n = [];
+  if (S.cats.length > MAX_CLOSE_CATS) n.push(`Showing the first ${MAX_CLOSE_CATS} of ${S.cats.length} selected types.`);
+  n.push(`Gaps = months with fewer than ${IDX.min_close_n} requests, or where half or more are still open. Requests DC hasn’t closed count as the slowest, so recent months aren’t made to look faster by leaving them out. “Closed” is DC’s own status — it doesn’t always mean the problem was fixed.`);
+  $('closenote').textContent = n.join(' ');
+}
+
+// ---- boot ------------------------------------------------------------------
+fetch('agg/area_trends/index.json').then(r => r.ok ? r.json() : Promise.reject(r.status)).then(idx => {
+  IDX = idx;
+  idx.areas.forEach(a => { AREA[a.id] = a; });
+  idx.categories.forEach(c => { CAT[c.code] = c; });
+  const years = [...new Set(idx.months.map(m => +m.slice(0, 4)))];
+  $('from').innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
+  fillCats();
+  readUrl();
+  $('ward').onchange = e => { S.area = e.target.value || 'city'; S._ward = e.target.value; update(); };
+  $('anc').onchange = e => { S.area = e.target.value || $('ward').value; update(); };
+  $('smd').onchange = e => { S.area = e.target.value || $('anc').value; update(); };
+  $('measure').onclick = e => { const v = e.target.dataset && e.target.dataset.v; if (v) { S.measure = v; update(); } };
+  $('smooth').onchange = e => { S.smooth = e.target.checked; update(); };
+  $('from').onchange = e => { S.from = +e.target.value; update(); };
+  $('copy').onclick = async () => {
+    try { await navigator.clipboard.writeText(location.href); $('copied').textContent = 'copied'; }
+    catch (e) { $('copied').textContent = 'copy the address bar'; }
+    setTimeout(() => { $('copied').textContent = ''; }, 2500);
+  };
+  $('prov').innerHTML = `Data: DC 311 service requests (DC Open Data / ArcGIS), ${esc(idx.months[0])} through ${esc(idx.data_through)}. ` +
+    `${esc(idx.method)} Built ${esc((idx.generated || '').slice(0, 10))}. ` +
+    `Areas use today’s (2023) SMD and ANC lines for every year, so older months are re-drawn onto current boundaries.`;
+  update();
+}).catch(err => {
+  $('title').textContent = 'Couldn’t load the area data.';
+  console.warn('area_trends index unavailable:', err);
+});
+</script>
+</body>
+</html>

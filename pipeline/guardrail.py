@@ -226,6 +226,49 @@ def check_rats_export(require, warns):
         require(ok, f"rats export file {f.get('path')} missing or sha256 mismatch")
 
 
+def check_area_trends(require, warns):
+    """agg/area_trends/ (area_trends.py): the index must list every area, every
+    area file must exist and parse, SMDs must add up to the city total, and the
+    files must stay small enough to load one area at a time."""
+    base = ROOT / "agg" / "area_trends"
+    idx, _ = _load("agg/area_trends/index.json")
+    if not isinstance(idx, dict):
+        require(False, f"agg/area_trends/index.json missing or malformed ({idx})")
+        return
+    areas = idx.get("areas") or []
+    months = idx.get("months") or []
+    smds = [a for a in areas if a.get("level") == "smd"]
+    require(len(smds) >= 300, f"area_trends: too few SMDs ({len(smds)})")
+    require(sum(a.get("level") == "ward" for a in areas) == 8, "area_trends: expected 8 wards")
+    require(len(months) > 100, f"area_trends: too few months ({len(months)})")
+    require(len(idx.get("categories") or []) >= 10, "area_trends: too few categories")
+    require(bool(idx.get("presets")), "area_trends: no presets")
+    require(all("/" not in a["id"] for a in areas), "area_trends: an area id is not filename-safe")
+    city, _ = _load("agg/area_trends/city.json")
+    if not isinstance(city, dict):
+        require(False, "agg/area_trends/city.json missing or malformed")
+        return
+    tot = city.get("all") or []
+    require(len(tot) == len(months), "area_trends: city series length != months")
+    require(sum(tot) >= 3_000_000, f"area_trends: city total too low ({sum(tot):,})")
+    last_full = tot[-2] if idx.get("partial_last") and len(tot) > 1 else (tot[-1] if tot else 0)
+    require(last_full > 10_000, f"area_trends: latest complete month only {last_full:,} requests")
+    sums, missing, biggest = [0] * len(months), [], 0
+    for a in areas:
+        p = base / f"{a['id']}.json"
+        if not p.exists():
+            missing.append(a["id"])
+            continue
+        biggest = max(biggest, p.stat().st_size)
+        if a.get("level") == "smd":
+            for i, v in enumerate(json.loads(p.read_text()).get("all") or []):
+                if i < len(sums):
+                    sums[i] += v
+    require(not missing, f"area_trends: {len(missing)} area file(s) missing, e.g. {missing[:3]}")
+    require(sums == tot, "area_trends: SMD files don't add up to the city total")
+    require(biggest < 200_000, f"area_trends: largest area file {biggest:,} B (should be ~30 KB)")
+
+
 def main():
     errs = []
     warns = []
@@ -284,6 +327,9 @@ def main():
     anom, _ = _load("agg/anomalies.json")
     require(isinstance(anom, dict) and "board" in anom,
             "agg/anomalies.json missing or empty")
+
+    # --- area-trends page (per Ward/ANC/SMD monthly cubes)
+    check_area_trends(require, warns)
 
     # --- rat export for the abatement coordinator (a published contract — see rats.py)
     check_rats_export(require, warns)

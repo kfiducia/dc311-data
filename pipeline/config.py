@@ -131,6 +131,25 @@ ANOMALY_MIN_ABS = 20        # min reports in the target month to rank (kills sma
 ANOMALY_TOP_PER_WARD = 8    # standouts kept per ward
 ANOMALY_BOARD_N = 20        # citywide (ward, category) standouts on the leaderboard
 
+# --- Area trends (area-trends.html: monthly trend for one Ward / ANC / SMD) ---
+# Per-area files hold a month x category cube for every Ward, ANC and SMD, loaded
+# on demand, so the page never downloads the whole city at once.
+AREA_TRENDS_START_YEAR = 2016   # SMDs are 2023 boundaries applied to every year
+AREA_TRENDS_TOP_N = 30          # top-N codes by volume kept; the rest fold into "Other"
+AREA_TRENDS_MIN_CLOSE_N = 3     # a month needs >= this many requests to show a median
+# Shortcut buttons on the page. Codes, not labels: DC renames services without
+# changing the code (S0311 is "DC Health Rodent & Vector Control" since mid-2026).
+# Preset codes are always kept, even if they fall outside the top N.
+AREA_TRENDS_PRESETS = [
+    {"key": "trash", "label": "Missed trash & recycling", "codes": ["S0441", "S0321"]},
+    {"key": "bulk", "label": "Bulk trash", "codes": ["S0031"]},
+    {"key": "dumping", "label": "Illegal dumping", "codes": ["S0181"]},
+    {"key": "rats", "label": "Rats", "codes": ["S0311"]},
+    {"key": "parking", "label": "Parking enforcement", "codes": ["S0261", "RPP"]},
+    {"key": "potholes", "label": "Potholes", "codes": ["S0301"]},
+    {"key": "streetlights", "label": "Streetlights", "codes": ["S05SL"]},
+]
+
 # --- History window for seasonal baselines ---
 START_YEAR = 2018  # earliest year to pull; more history = better seasonality
 

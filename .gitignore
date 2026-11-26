@@ -13,3 +13,6 @@ data/raw/*.part
 # Rat-report export (pipeline/rats.py) — built in CI and published to Pages only,
 # never committed (~10 MB, rebuilt weekly).
 agg/rats/
+# Area-trend cubes (pipeline/area_trends.py) — ~400 small per-area files, built in
+# CI and published to Pages only, never committed.
+agg/area_trends/

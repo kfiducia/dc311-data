@@ -175,7 +175,10 @@
 <nav class="nav">
   <div class="nav-inner">
     <a href="index.html" class="nav-back">all dashboards</a>
-    <a href="early-warning.html" class="nav-tag">🐀 Rat Radar</a>
+    <span style="display:flex;gap:1.1rem;flex-wrap:wrap">
+      <a href="area-trends.html" class="nav-tag">Area trends</a>
+      <a href="early-warning.html" class="nav-tag">🐀 Rat Radar</a>
+    </span>
   </div>
 </nav>
 
@@ -221,6 +224,7 @@
     <button class="drill-clear" id="drillClear">clear ✕</button>
     <h2 id="drillTitle">—</h2>
     <p id="drillSub">Requests inside this district, by service type.</p>
+    <p><a id="drillTrend" href="area-trends.html" style="color:var(--accent);font-weight:600">Monthly trend for this SMD, vs its ANC, ward and DC →</a></p>
     <div class="drill-grid">
       <div>
         <p class="dh">Requests by type <span id="drillYearLab" class="muted"></span></p>
@@ -427,6 +431,9 @@ function init(D, geo) {
     const label = (D.smd_labels && D.smd_labels[id]) || id;
     document.getElementById('drill').hidden = false;
     document.getElementById('drillTitle').textContent = `${id} — ${label}`;
+    // area-trends ids are filename-safe: SMD "3/4G01" -> "smd-3-4G01"
+    document.getElementById('drillTrend').href =
+      'area-trends.html?area=smd-' + encodeURIComponent(id.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, ''));
     renderDrillType(idx);
     renderDrillTime(idx);
     document.getElementById('drill').scrollIntoView({ behavior: 'smooth', block: 'start' });
